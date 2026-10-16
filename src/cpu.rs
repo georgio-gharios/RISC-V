@@ -1,7 +1,12 @@
 //! The hart: registers, pc, and the execute step.
 
 use crate::decode::{decode, AluOp, BranchOp, Instr, LoadOp, StoreOp};
-use crate::mem::{Bus, BusError};
+use crate::mem::{Bus, BusError, RAM_BASE};
+
+/// Decoded-instruction cache: one lazily allocated page of slots per 4 KiB of RAM that has been
+/// executed. A store to RAM clears the slots it touches, so self-modifying code still works.
+const PAGE_WORDS: usize = 1024;
+type ICachePage = Box<[Option<Instr>; PAGE_WORDS]>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Halt {
@@ -17,6 +22,7 @@ pub struct Cpu {
     pub pc: u32,
     pub bus: Bus,
     pub instret: u64,
+    icache: Vec<Option<ICachePage>>, // indexed by (addr - RAM_BASE) / 4096
 }
 
 fn alu(op: AluOp, a: u32, b: u32) -> u32 {
@@ -65,11 +71,40 @@ fn branch_taken(op: BranchOp, a: u32, b: u32) -> bool {
 
 impl Cpu {
     pub fn new(bus: Bus, pc: u32) -> Self {
-        Cpu { regs: [0; 32], pc, bus, instret: 0 }
+        let pages = bus.ram.len().div_ceil(4 * PAGE_WORDS);
+        Cpu { regs: [0; 32], pc, bus, instret: 0, icache: (0..pages).map(|_| None).collect() }
     }
 
     fn set(&mut self, rd: usize, value: u32) {
         if rd != 0 { self.regs[rd] = value; } // x0 is hard-wired to zero
+    }
+
+    /// Fetch and decode the instruction at `pc`, from the cache when possible.
+    fn fetch(&mut self, pc: u32) -> Result<Instr, Halt> {
+        let off = pc.wrapping_sub(RAM_BASE) as usize;
+        let slot = match self.icache.get_mut(off / (4 * PAGE_WORDS)) {
+            Some(page) if pc & 3 == 0 => {
+                let page = page.get_or_insert_with(|| Box::new([None; PAGE_WORDS]));
+                let slot = &mut page[(off / 4) % PAGE_WORDS];
+                if let Some(instr) = *slot { return Ok(instr); }
+                Some(slot)
+            }
+            _ => None, // outside RAM or misaligned: no caching
+        };
+        let word = self.bus.read(pc, 4).map_err(|BusError(addr)| Halt::BusFault { pc, addr })?;
+        let instr = decode(word).ok_or(Halt::IllegalInstruction { pc, word })?;
+        if let Some(slot) = slot { *slot = Some(instr); }
+        Ok(instr)
+    }
+
+    /// Forget cached instructions in the RAM words covered by a store.
+    fn invalidate(&mut self, addr: u32, width: u32) {
+        let off = addr.wrapping_sub(RAM_BASE) as usize;
+        for a in [off, off.wrapping_add(width as usize - 1)] {
+            if let Some(Some(page)) = self.icache.get_mut(a / (4 * PAGE_WORDS)) {
+                page[(a / 4) % PAGE_WORDS] = None;
+            }
+        }
     }
 
     /// Fetch, decode, execute one instruction.
@@ -77,8 +112,7 @@ impl Cpu {
         let pc = self.pc;
         let fault = |BusError(addr)| Halt::BusFault { pc, addr };
 
-        let word = self.bus.read(pc, 4).map_err(fault)?;
-        let instr = decode(word).ok_or(Halt::IllegalInstruction { pc, word })?;
+        let instr = self.fetch(pc)?;
         let mut next_pc = pc.wrapping_add(4);
 
         match instr {
@@ -113,6 +147,7 @@ impl Cpu {
                 let addr = self.regs[rs1].wrapping_add(imm as u32);
                 let width = match op { StoreOp::Sb => 1, StoreOp::Sh => 2, StoreOp::Sw => 4 };
                 self.bus.write(addr, self.regs[rs2], width).map_err(fault)?;
+                self.invalidate(addr, width);
             }
             Instr::OpImm { op, rd, rs1, imm } => self.set(rd, alu(op, self.regs[rs1], imm as u32)),
             Instr::Op { op, rd, rs1, rs2 } => self.set(rd, alu(op, self.regs[rs1], self.regs[rs2])),

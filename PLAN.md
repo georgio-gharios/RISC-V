@@ -57,10 +57,13 @@ Hard stop after each phase. Do not start the next until told "next".
   in game. Guest waits on the clock 0-4% of the time, so it is CPU-bound. Native: 73-88 MIPS; on a real trace,
   isolated fetch ~3 ns + decode ~9 ns vs 11.3 ns per full step (overlap, so decode share is uncertain).
   35 fps in E1M1 needs ~115 MIPS while running (~2x). Ranking in the step 3 report: decode cache, then Web Worker.
+- [x] **Step 4: decoded-instruction cache** (option 1). Per-4 KiB lazily allocated pages of decoded `Instr`s,
+  cleared word-wise on stores. *Measured, headless, 2 runs each:* E1M1 fps 10.8-12.8 -> 20.0-26.6 (~1.8x), title
+  17.7-18.7 -> 31.5-33.5; MIPS while running 46-57 -> 85-120. Native ~56-73 -> ~78-88 (noisy). cargo test 11/11
+  (new tests/icache.rs fails without invalidation; riscv-tests fence_i alone did not), 50/50 riscv-tests, smoke passes.
 
 ## Next (not started; see HANDOFF.md §6 for acceptance tests)
 - [ ] Gameplay smoke test (fire/move in E1M1), verifies hypothesis A (input)
 - [ ] Measure game speed via `gametic` (35 tics/s), verifies hypothesis B (timing)
-- [ ] Decoded-instruction cache (target >= 120 MIPS native)
 - [ ] Emulator in a Web Worker
 - [ ] Phone-width layout check

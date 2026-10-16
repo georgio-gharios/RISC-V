@@ -36,8 +36,8 @@ sources: their `.bin` outputs are committed, so `cargo test` works without the c
 ### Native: build, run, test
 ```sh
 cargo build --release
-cargo test --release                      # expect 9 passed, 1 ignored (the Doom test), 0 failed
-cargo test --release -- --include-ignored # expect 10 passed; needs doom/doom.bin and the WAD (~4 s)
+cargo test --release                      # expect 10 passed, 1 ignored (the Doom test), 0 failed
+cargo test --release -- --include-ignored # expect 11 passed; needs doom/doom.bin and the WAD (~4 s)
 cargo run --release --bin riscv-tests     # expect a table of 50 rows all PASS, then "50/50 passed"
 cargo run --release -- programs/mandel.bin    # ASCII Mandelbrot, 28 lines x 72 chars, exit 0
 cargo run --release -- programs/primes.bin    # ends with "count below 100000: 9592"
@@ -89,6 +89,8 @@ Browser loop: main.js tick() is driven by requestAnimationFrame. It calls wasm.r
   until 12 ms of that animation frame are used, then draws the canvas, drains the UART, and refreshes the panel at most every 100 ms.
   The guest does not run in the gaps between animation frames, but its clock keeps advancing.
 RAM fast path: src/mem.rs Bus::read (line ~85) and Bus::write (line ~104): whole access in RAM -> slice + from/to_le_bytes.
+Decode cache: src/cpu.rs Cpu::fetch keeps decoded Instrs in lazily allocated 4 KiB pages; a Store clears the
+  words it touches (Cpu::invalidate). tests/icache.rs covers patching already-executed code (riscv-tests fence_i does not).
 Register change: src/cpu.rs step() reads self.regs directly (no 128-byte snapshot per step); Jalr (line ~91) computes the target before writing rd.
 ```
 
