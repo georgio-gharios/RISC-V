@@ -119,5 +119,7 @@ is correct) and game-time drift, held keys, and the last 10 key events with thei
 
 Controls: arrows move, Ctrl fire, Space use, Shift run, Alt strafe, Enter/Esc menu, Y to confirm.
 If `doom.bin` is not deployed, the page falls back to the Phase 3 programs. See `docs/web.png`.
-Speed (decoded-instruction cache): ~85-120 MIPS while running in headless Chromium, ~20-27 fps in E1M1 and
-~32 fps on the title screen; ~78-88 MIPS natively (noisy machine).
+The emulator runs in a Web Worker (`web/www/worker.js`); the page only draws the latest finished frame and
+forwards keys. Frames are passed as two transferred ArrayBuffers, so no COOP/COEP headers or SharedArrayBuffer
+are needed and any static server works.
+Speed (decode cache + worker, headless Chromium): ~80-115 MIPS, ~25-34 fps in E1M1; ~78-88 MIPS natively.

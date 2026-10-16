@@ -63,15 +63,23 @@ if (!state.console.includes("I_InitGraphics")) fail("Doom console output missing
 // (gamekeydown[], int array, address from doom.syms.json) shows both pressed, then both released.
 for (let i = 0; i < 3; i++) { await page.keyboard.press("Enter"); await page.waitForTimeout(400); } // new game, E1, skill
 await page.waitForTimeout(2000);
-const guestKeys = () => page.evaluate(() => {
+// The emulator lives in worker.js: the page has no wasm instance, and every guest read below goes
+// through the worker (window.rvQuery -> postMessage -> wasm.peek), as do the keys.
+const onMain = await page.evaluate(() => ({ wasm: typeof wasm, inWorker: window.rvDebug?.inWorker }));
+console.log("main thread:", onMain);
+if (onMain.wasm !== "undefined" || onMain.inWorker !== true) fail("emulator is not running in the worker");
+const guestKeys = () => page.evaluate(async () => {
   const base = parseInt(window.rvSyms.gamekeydown, 16);
-  return { right: wasm.peek(base + 4 * 0xae), fire: wasm.peek(base + 4 * 0xa3) };
+  const { values } = await window.rvQuery([base + 4 * 0xae, base + 4 * 0xa3]);
+  return { right: values[0], fire: values[1] };
 });
 // Poll rather than sleep: during the level-start screen wipe Doom processes no input at all.
-const waitKeys = (want) => page.waitForFunction((want) => {
-  const base = parseInt(window.rvSyms.gamekeydown, 16);
-  return wasm.peek(base + 4 * 0xae) === want && wasm.peek(base + 4 * 0xa3) === want;
-}, want, { timeout: 10000 }).catch(() => {});
+const waitKeys = async (want) => {
+  for (const end = Date.now() + 10000; Date.now() < end; await page.waitForTimeout(100)) {
+    const k = await guestKeys();
+    if (k.right === want && k.fire === want) return;
+  }
+};
 await page.keyboard.down("ArrowRight");
 await page.keyboard.down("Control");
 await waitKeys(1);
@@ -86,11 +94,12 @@ if (whileHeld.right !== 1 || whileHeld.fire !== 1) fail("Right+Ctrl did not reac
 if (afterBlur.right !== 0 || afterBlur.fire !== 0) fail("keys still held in the guest after window blur");
 
 // Dropdown focus: arrow keys must go to the game, not change the selected program.
-const delivered0 = await page.evaluate(() => wasm.keys_delivered());
+const delivered = () => page.evaluate(async () => (await window.rvQuery()).keysDelivered);
+const delivered0 = await delivered();
 await page.focus("#program");
 await page.keyboard.press("ArrowDown");
 await page.waitForTimeout(300);
-const dd = await page.evaluate(() => ({ value: document.getElementById("program").value, delivered: wasm.keys_delivered() }));
+const dd = { value: await page.evaluate(() => document.getElementById("program").value), delivered: await delivered() };
 console.log("dropdown after ArrowDown:", dd.value, "guest key events:", dd.delivered - delivered0);
 if (dd.value !== "doom.bin") fail("ArrowDown on the focused dropdown changed the program");
 if (dd.delivered - delivered0 !== 2) fail("ArrowDown on the focused dropdown did not reach the guest");

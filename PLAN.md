@@ -61,9 +61,13 @@ Hard stop after each phase. Do not start the next until told "next".
   cleared word-wise on stores. *Measured, headless, 2 runs each:* E1M1 fps 10.8-12.8 -> 20.0-26.6 (~1.8x), title
   17.7-18.7 -> 31.5-33.5; MIPS while running 46-57 -> 85-120. Native ~56-73 -> ~78-88 (noisy). cargo test 11/11
   (new tests/icache.rs fails without invalidation; riscv-tests fence_i alone did not), 50/50 riscv-tests, smoke passes.
+- [x] **Step 5: emulator in a Web Worker** (option 2). Transferred double buffers (python http.server sends no
+  COOP/COEP, so no SharedArrayBuffer). *Measured, headless, E1M1 1 s windows:* before 17.7-21.9 fps (guest got ~76%
+  of wall time), after 25.5-34.4 fps (worker busy 99%), ~+60%. Smoke asserts no wasm on the main thread and that
+  keys reach Doom's gamekeydown[] through the worker (fails if key forwarding is removed). Pause/Step/Run checked
+  ad hoc. cargo test 11/11, riscv-tests 50/50, smoke passes.
 
 ## Next (not started; see HANDOFF.md §6 for acceptance tests)
 - [ ] Gameplay smoke test (fire/move in E1M1), verifies hypothesis A (input)
 - [ ] Measure game speed via `gametic` (35 tics/s), verifies hypothesis B (timing)
-- [ ] Emulator in a Web Worker
 - [ ] Phone-width layout check

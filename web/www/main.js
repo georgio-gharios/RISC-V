@@ -1,4 +1,5 @@
-// rv-doom browser front end. Talks to rv_doom_web.wasm through plain exports + linear memory.
+// rv-doom browser front end. The emulator runs in worker.js; this thread draws the latest finished
+// frame on each animation frame, forwards keys, and shows the panel, console and debug overlay.
 "use strict";
 
 const PROGRAMS = [
@@ -24,57 +25,72 @@ const $ = (id) => document.getElementById(id);
 const canvas = $("screen");
 const ctx = canvas.getContext("2d");
 const image = ctx.createImageData(320, 200);
-const decoder = new TextDecoder();
-
-let wasm, running = true, halted = false;
+const worker = new Worker("worker.js");
+let running = true, halted = false;
 const held = new Set();  // Doom keycodes currently down in the guest
 let lastStats = { t: 0, instret: 0, frames: 0 };
 let prevRegs = new Uint32Array(33);
+let pendingFrame = null;  // latest frame buffer from the worker, not drawn yet
+let live = { instret: 0, frames: 0, keysDelivered: 0 };  // latest worker counters
 
-// Debug overlay (toggle with the ` key, or start with ?debug). Measurements always run; the
-// latest snapshot is also exposed as window.rvDebug for the headless tests.
+// Debug overlay (toggle with the ` key, or start with ?debug). The worker measures the emulator side,
+// this thread the display side; the merged snapshot is also exposed as window.rvDebug for the tests.
 const DEBUG_KEY = "Backquote";  // unused by Doom; never forwarded to the guest
 const dbg = {
   on: new URLSearchParams(location.search).has("debug"),
-  gameticAddr: 0,
   keys: [], sent: 0,                       // key log, events queued since load
-  win: null,                               // start of the current 1 s measurement window
-  raf: 0, draws: 0, runMs: 0, maxJump: 0, lastTimer: 0,
-  t: { emu: 0, rgba: 0, put: 0, ui: 0, interval: 0 }, lastRaf: 0,  // ms per window, see tick()
-  waitRanges: [], pcSamples: 0, pcWait: 0,  // pc sampled after each run() slice
-  load: null,                              // {wall, timer} at program load
-  tic0: null,                              // {wall, tic} when gametic was first seen non-zero
-  snap: {},
+  win: performance.now(), raf: 0, draws: 0, lastRaf: 0,
+  t: { draw: 0, ui: 0, interval: 0 },      // main-thread ms per window, see tick()
+  load: 0, worker: {}, snap: {},
 };
 
-const text = (len) => decoder.decode(new Uint8Array(wasm.memory.buffer, wasm.text_ptr(), len));
+// Request/response to the worker (program loads and fresh guest reads).
+let nextId = 1;
+const pending = new Map();
+function request(msg) {
+  return new Promise((resolve) => { const id = nextId++; pending.set(id, resolve); worker.postMessage({ ...msg, id }); });
+}
+// For tests and debugging: read guest words through the worker. Resolves to {values, keysDelivered}.
+window.rvQuery = (peek = []) => request({ type: "query", peek });
+
+worker.onmessage = ({ data: m }) => {
+  switch (m.type) {
+    case "frame":
+      if (pendingFrame) worker.postMessage({ type: "buffer", buf: pendingFrame }, [pendingFrame]);  // superseded
+      pendingFrame = m.buf;
+      break;
+    case "uart": appendConsole(m.text); break;
+    case "panel": updatePanel(m); break;
+    case "stats":
+      live = m;
+      if (m.snap) dbg.worker = m.snap;
+      break;
+    case "loaded": case "query": pending.get(m.id)?.(m); pending.delete(m.id); break;
+    case "error": showError(m.error); break;
+  }
+};
+worker.onerror = (e) => showError(e.message);
 
 async function loadProgram(path) {
-  const resp = await fetch(path);
-  if (!resp.ok) throw new Error(`${path}: ${resp.status}`);
-  const bytes = new Uint8Array(await resp.arrayBuffer());
-  const ptr = wasm.upload_buffer(bytes.length);
-  new Uint8Array(wasm.memory.buffer, ptr, bytes.length).set(bytes);
-  if (wasm.load() !== 0) throw new Error("image does not fit in RAM");
   $("console").textContent = "";
-  halted = false;
-  dbg.isDoom = path === "doom.bin";
-  dbg.load = null; dbg.tic0 = null; dbg.sent = 0; held.clear(); dbg.keys = []; dbg.win = null;
+  held.clear(); dbg.keys = []; dbg.sent = 0; dbg.load = performance.now();
   lastStats = { t: performance.now(), instret: 0, frames: 0 };
-  draw(); updatePanel();
+  const r = await request({ type: "load", path });
+  if (r.error) throw new Error(r.error);
+  halted = false;
+  worker.postMessage({ type: "run", on: running });
 }
 
 function draw() {
-  const t0 = performance.now();
-  image.data.set(new Uint8Array(wasm.memory.buffer, wasm.frame_rgba(), 320 * 200 * 4));
-  const t1 = performance.now();
+  if (!pendingFrame) return false;
+  image.data.set(new Uint8Array(pendingFrame));
   ctx.putImageData(image, 0, 0);
-  dbg.t.rgba += t1 - t0; dbg.t.put += performance.now() - t1;
+  worker.postMessage({ type: "buffer", buf: pendingFrame }, [pendingFrame]);
+  pendingFrame = null;
+  return true;
 }
 
-function drainConsole() {
-  const out = text(wasm.take_uart());
-  if (!out) return;
+function appendConsole(out) {
   const el = $("console");
   el.textContent = (el.textContent + out).slice(-20000);
   el.scrollTop = el.scrollHeight;
@@ -85,23 +101,23 @@ function buildRegs() {
     `<div class="reg" id="r${i}"><span class="name">${name}</span><span class="val">00000000</span></div>`).join("");
 }
 
-function updatePanel() {
-  const regs = new Uint32Array(wasm.memory.buffer, wasm.regs(), 33);
+function updatePanel({ regs, disasm, status, halted: h }) {
   for (let i = 0; i < 32; i++) {
     const el = $("r" + i);
     el.lastChild.textContent = regs[i].toString(16).padStart(8, "0");
     el.classList.toggle("changed", regs[i] !== prevRegs[i]);
   }
   $("pc").textContent = regs[32].toString(16).padStart(8, "0");
-  prevRegs = regs.slice();
-  $("disasm").textContent = text(wasm.disasm_current());
-  $("status").textContent = text(wasm.status_text());
+  prevRegs = regs;
+  $("disasm").textContent = disasm;
+  $("status").textContent = status;
+  halted = h;
 }
 
 function updateStats(now) {
   const dt = (now - lastStats.t) / 1000;
   if (dt < 0.5) return;
-  const instret = wasm.instret(), frames = wasm.frames();
+  const { instret, frames } = live;
   $("mips").textContent = ((instret - lastStats.instret) / dt / 1e6).toFixed(1);
   $("fps").textContent = Math.round((frames - lastStats.frames) / dt);
   $("instret").textContent = instret.toLocaleString("en-US");
@@ -118,64 +134,30 @@ function logKey(e, code, fate) {
 }
 
 function keyLine(k) {
-  const t = ((k.t - (dbg.load?.wall ?? 0)) / 1000).toFixed(2).padStart(7);
+  const t = ((k.t - dbg.load) / 1000).toFixed(2).padStart(7);
   const doom = k.doom ? "0x" + k.doom.toString(16).padStart(2, "0") : "    ";
   const fate = k.fate !== "sent" ? "DROPPED (" + k.fate + ")"
-    : wasm.keys_delivered() >= k.seq ? `delivered #${k.seq}` : `queued #${k.seq}`;
+    : live.keysDelivered >= k.seq ? `delivered #${k.seq}` : `queued #${k.seq}`;
   return `${t}s ${k.type.padEnd(4)} ${k.code.padEnd(11)} ${(k.mods || "-").padEnd(10)} ${k.repeat ? "rep" : "   "} ${doom} ${fate}`;
 }
 
-// Is the guest waiting on the clock (DG_SleepMs, I_GetTime ...) rather than doing work?
-function samplePc() {
-  if (!dbg.isDoom || !dbg.waitRanges.length) return;
-  const pc = new Uint32Array(wasm.memory.buffer, wasm.regs(), 33)[32];
-  dbg.pcSamples++;
-  if (dbg.waitRanges.some(([lo, len]) => pc >= lo && pc < lo + len)) dbg.pcWait++;
-}
-
-// Called once per animation frame with the guest timer jump seen by this frame's slices.
-function debugSample(sliceMs, newFrame) {
-  const now = performance.now();  // not the rAF timestamp: it is stale on the first frame after a load
-  if (!dbg.load) dbg.load = { wall: now, timer: wasm.timer_ms() };
-  const w = dbg.win ??= { t: now, instret: wasm.instret(), frames: wasm.frames(), tic: 0 };
-  dbg.raf++; dbg.runMs += sliceMs; if (newFrame) dbg.draws++;
-  const tic = dbg.isDoom && dbg.gameticAddr ? wasm.peek(dbg.gameticAddr) : 0;
-  if (tic && !dbg.tic0) dbg.tic0 = { wall: now, tic };
-  if (!w.tic) w.tic = tic;
-  const dt = (now - w.t) / 1000;
-  if (dt >= 1) {
-    const s = dbg.snap = {
-      rafFps: dbg.raf / dt,                                   // animation frames the browser gave us
-      drawFps: dbg.draws / dt,                                // canvas updates that showed a new guest frame
-      guestFps: (wasm.frames() - w.frames) / dt,              // DG_DrawFrame calls
-      mips: (wasm.instret() - w.instret) / dt / 1e6,
-      cpuShare: dbg.runMs / (dt * 1000),                      // share of wall time spent inside wasm.run
-      maxJumpMs: dbg.maxJump,                                 // largest guest-clock step between two run() calls
-      clockDriftMs: (wasm.timer_ms() - dbg.load.timer) - (now - dbg.load.wall),
-      ticsPerSec: tic && w.tic ? (tic - w.tic) / dt : null,
-      gameDriftMs: dbg.tic0 ? (tic - dbg.tic0.tic) * 1000 / 35 - (now - dbg.tic0.wall) : null,
-      gametic: tic,
-      keys: dbg.keys.map(keyLine),
-      held: [...held],
-      // Per animation frame, in ms (averaged over the window). idle = rAF interval minus our JS work:
-      // browser compositing, GC and true idle time are all in there.
-      perRaf: (() => {
-        const n = dbg.raf || 1, t = dbg.t, avg = (v) => v / n;
-        const interval = t.interval / n;
-        return { interval, emu: avg(t.emu), rgba: avg(t.rgba), put: avg(t.put), ui: avg(t.ui),
-                 idle: interval - avg(t.emu + t.rgba + t.put + t.ui) };
-      })(),
-      instrPerRaf: (wasm.instret() - w.instret) / (dbg.raf || 1),
-      mipsWhileRunning: (wasm.instret() - w.instret) / dbg.t.emu / 1e3,
-      instrPerGuestFrame: wasm.frames() > w.frames ? (wasm.instret() - w.instret) / (wasm.frames() - w.frames) : null,
-      waitShare: dbg.pcSamples ? dbg.pcWait / dbg.pcSamples : null,
-    };
-    window.rvDebug = s;
-    dbg.win = { t: now, instret: wasm.instret(), frames: wasm.frames(), tic };
-    dbg.raf = dbg.draws = dbg.runMs = dbg.maxJump = dbg.pcSamples = dbg.pcWait = 0;
-    dbg.t = { emu: 0, rgba: 0, put: 0, ui: 0, interval: 0 };
-  }
-  if (dbg.on) renderDebug();
+// Main-thread side of the overlay, once per animation frame.
+function debugSample(now) {
+  const dt = (now - dbg.win) / 1000;
+  if (dt < 1) return;
+  const n = dbg.raf || 1, t = dbg.t, interval = t.interval / n;
+  dbg.snap = window.rvDebug = {
+    ...dbg.worker,
+    rafFps: dbg.raf / dt,                       // animation frames the browser gave us
+    drawFps: dbg.draws / dt,                    // canvas updates that showed a new guest frame
+    // Per animation frame, in ms. idle = rAF interval minus our JS work (compositing, GC, true idle).
+    perRaf: { interval, draw: t.draw / n, ui: t.ui / n, idle: interval - (t.draw + t.ui) / n },
+    keys: dbg.keys.map(keyLine),
+    held: [...held],
+    inWorker: true,
+  };
+  dbg.win = now; dbg.raf = dbg.draws = 0;
+  dbg.t = { draw: 0, ui: 0, interval: 0 };
 }
 
 function renderDebug() {
@@ -184,11 +166,11 @@ function renderDebug() {
   el.hidden = false;
   el.textContent = [
     `display  ${f(s.rafFps)} rAF/s   ${f(s.drawFps)} new frames drawn/s   guest ${f(s.guestFps)} fps`,
-    `emulator ${f(s.mips)} MIPS   guest ran ${f(100 * s.cpuShare, 0)}% of wall time`,
-    `per rAF  ${f(s.perRaf?.interval)} ms = emu ${f(s.perRaf?.emu)} + rgba ${f(s.perRaf?.rgba, 2)} + putImage ${f(s.perRaf?.put, 2)}` +
-      ` + ui ${f(s.perRaf?.ui, 2)} + idle ${f(s.perRaf?.idle)}`,
-    `budget   ${f(s.instrPerRaf / 1e6, 2)}M instr/rAF at ${f(s.mipsWhileRunning)} MIPS while running   ` +
-      `${f(s.instrPerGuestFrame / 1e6, 2)}M instr/guest frame   waiting on clock ${f(100 * s.waitShare, 1)}%`,
+    `emulator ${f(s.mips)} MIPS (in worker)   worker busy ${f(100 * s.busyShare, 0)}% of its wall time`,
+    `main     per rAF ${f(s.perRaf?.interval)} ms = draw ${f(s.perRaf?.draw, 2)} + ui ${f(s.perRaf?.ui, 2)}` +
+      ` + idle ${f(s.perRaf?.idle)}`,
+    `budget   ${f(s.mipsWhileRunning)} MIPS while running   ${f(s.instrPerGuestFrame / 1e6, 2)}M instr/guest frame   ` +
+      `frame copy ${f(s.copyMsPerSec)} ms/s   waiting on clock ${f(100 * s.waitShare, 1)}%`,
     `timer    guest-vs-wall drift ${f(s.clockDriftMs, 0)} ms   max clock jump ${f(s.maxJumpMs, 0)} ms`,
     `doom     gametic ${s.gametic ?? "n/a"}   ${f(s.ticsPerSec)} tics/s (want 35)   game-time drift ${f(s.gameDriftMs, 0)} ms`,
     `held     ${s.held?.length ? s.held.map((c) => "0x" + c.toString(16)).join(" ") : "-"}`,
@@ -197,42 +179,30 @@ function renderDebug() {
   ].join("\n");
 }
 
-let lastPanel = 0;
 function tick(now) {
-  if (running && !halted) {
-    // Run in slices until ~12 ms of this animation frame are used.
-    const start = performance.now(), frames0 = wasm.frames();
-    do {
-      const t = Math.floor(performance.now());
-      if (dbg.lastTimer) dbg.maxJump = Math.max(dbg.maxJump, t - dbg.lastTimer);
-      dbg.lastTimer = t;
-      halted = wasm.run(100000, t) !== 0;
-      samplePc();
-    } while (!halted && performance.now() - start < 12);
-    const emuEnd = performance.now();
-    draw();
-    const uiStart = performance.now();
-    drainConsole();
-    if (now - lastPanel > 100 || halted) { updatePanel(); lastPanel = now; }
-    dbg.t.emu += emuEnd - start;
-    if (dbg.lastRaf) dbg.t.interval += now - dbg.lastRaf;
-    dbg.lastRaf = now;
-    debugSample(emuEnd - start, wasm.frames() !== frames0);
-    dbg.t.ui += performance.now() - uiStart;  // console, panel, overlay
-  }
+  const t0 = performance.now();
+  if (draw()) dbg.draws++;
+  const t1 = performance.now();
   updateStats(now);
+  debugSample(t1);
+  if (dbg.on) renderDebug();
+  dbg.raf++;
+  if (dbg.lastRaf) dbg.t.interval += now - dbg.lastRaf;
+  dbg.lastRaf = now;
+  dbg.t.draw += t1 - t0;
+  dbg.t.ui += performance.now() - t1;
   requestAnimationFrame(tick);
 }
 
 function setRunning(on) {
   running = on;
   $("run").textContent = on ? "Pause" : "Run";
-  if (!on) updatePanel();
+  worker.postMessage({ type: "run", on });
 }
 
+function sendKey(code, pressed) { worker.postMessage({ type: "key", code, pressed }); }
+
 async function main() {
-  const { instance } = await WebAssembly.instantiateStreaming(fetch("rv_doom_web.wasm"), {});
-  wasm = instance.exports;
   buildRegs();
 
   const select = $("program");
@@ -241,11 +211,7 @@ async function main() {
   select.onchange = () => { select.blur(); canvas.focus(); loadProgram(select.value).catch(showError); };
   $("run").onclick = () => setRunning(!running);
   $("reset").onclick = () => loadProgram(select.value).catch(showError);
-  $("step").onclick = () => {
-    setRunning(false);
-    if (!halted) halted = wasm.run(1, Math.floor(performance.now())) !== 0;
-    draw(); drainConsole(); updatePanel();
-  };
+  $("step").onclick = () => { setRunning(false); worker.postMessage({ type: "step" }); };
 
   // Game keys are routed at the document level in the capture phase, whatever has focus,
   // so a focused dropdown or button never sees (or acts on) them.
@@ -266,7 +232,7 @@ async function main() {
       if (!down && !held.has(code)) return logKey(e, code, "not held");
       logKey(e, code, "sent");
       if (down) held.add(code); else held.delete(code);
-      wasm.key(code, down ? 1 : 0);
+      sendKey(code, down ? 1 : 0);
     }, { capture: true });
   }
 
@@ -274,7 +240,7 @@ async function main() {
   const releaseAll = (why) => {
     for (const code of held) {
       logKey({ type: "keyup", code: "(" + why + ")", key: "", repeat: false }, code, "sent");
-      wasm.key(code, 0);
+      sendKey(code, 0);
     }
     held.clear();
   };
@@ -282,17 +248,12 @@ async function main() {
   window.addEventListener("pagehide", () => releaseAll("pagehide"));
   document.addEventListener("visibilitychange", () => { if (document.hidden) releaseAll("hidden"); });
 
-  fetch("doom.syms.json").then((r) => r.json())
-    .then((syms) => {
-      dbg.gameticAddr = parseInt(syms.gametic, 16) || 0;
-      dbg.waitRanges = (syms.wait ?? []).map(([a, n]) => [parseInt(a, 16), parseInt(n, 16)]);
-      window.rvSyms = syms;
-    }).catch(() => {});
+  fetch("doom.syms.json").then((r) => r.json()).then((syms) => { window.rvSyms = syms; }).catch(() => {});
+  requestAnimationFrame(tick);
   // Default to Doom; fall back to the Phase 3 programs if doom.bin isn't deployed.
   try { await loadProgram(PROGRAMS[0][0]); }
   catch (e) { select.value = PROGRAMS[1][0]; await loadProgram(select.value).catch(showError); }
   canvas.focus();
-  requestAnimationFrame(tick);
 }
 
 function showError(e) { $("status").textContent = String(e); }

@@ -76,7 +76,8 @@ src/disasm.rs   Instr -> text (no pseudo-ops); src/png.rs: dependency-free PNG w
 src/lib.rs      machine(image, ram, echo) loads at 0x80000000, sp = top of RAM; riscv-test runner helpers; framebuffer_png
 src/main.rs     CLI; runs in 100k-instruction chunks, setting timer.ms from wall clock before each chunk
 web/src/lib.rs  cdylib with plain extern "C" exports (upload_buffer, load, run(steps, now_ms), key, frame_rgba, regs, disasm_current, take_uart...)
-web/www/main.js the loader and UI loop; strings are passed back as (text_ptr(), len)
+web/www/worker.js owns the wasm instance and runs the guest; strings come back from wasm as (text_ptr(), len)
+web/www/main.js  UI thread: draws frames on rAF, forwards keys, panel/console/overlay from worker messages
 
 Memory map (C defines in programs/devices.h; the Doom port has its own copy in doom/doomgeneric_rvdoom.c)
   0x1000_0000 UART       +0 write = print byte; +5 read = 0x20 (TX ready)
@@ -85,9 +86,12 @@ Memory map (C defines in programs/devices.h; the Doom port has its own copy in d
   0x1300_0000 FB ctrl    any store = frame done (frames += 1); read = frame count
   0x2000_0000 Framebuf   320x200 u32 0x00RRGGBB, row-major (256000 B)
   0x8000_0000 RAM        64 MiB; image loaded here; pc starts here
-Browser loop: main.js tick() is driven by requestAnimationFrame. It calls wasm.run(100000, floor(performance.now())) repeatedly
-  until 12 ms of that animation frame are used, then draws the canvas, drains the UART, and refreshes the panel at most every 100 ms.
-  The guest does not run in the gaps between animation frames, but its clock keeps advancing.
+Browser loop: worker.js loop() calls wasm.run(100000, floor(performance.now())) for ~8 ms batches, yielding between
+  batches through a MessageChannel (no setTimeout clamp) so key/control messages are handled. No catch-up cap: the guest
+  clock is just wall time. After a batch it posts a new frame (if the guest finished one and one of the 2 transfer
+  buffers is free), UART text, the panel (<= every 100 ms) and stats (every 250 ms; 1 s window snapshot).
+  main.js tick() (rAF) draws the newest pending frame and returns its buffer. window.rvQuery(addrs) reads guest words
+  through the worker (used by the smoke test). The page is not cross-origin isolated (checked: crossOriginIsolated=false).
 RAM fast path: src/mem.rs Bus::read (line ~85) and Bus::write (line ~104): whole access in RAM -> slice + from/to_le_bytes.
 Decode cache: src/cpu.rs Cpu::fetch keeps decoded Instrs in lazily allocated 4 KiB pages; a Store clears the
   words it touches (Cpu::invalidate). tests/icache.rs covers patching already-executed code (riscv-tests fence_i does not).
@@ -190,7 +194,7 @@ Register change: src/cpu.rs step() reads self.regs directly (no 128-byte snapsho
    *Accept:* the smoke test logs tics/s, and it is 35 ± 3 over 5 s after boot. If not, consider a deterministic guest clock (advance the timer by executed instructions or a fixed step per slice), or run the emulator in a Web Worker.
 4. **Speed** (more fps): cache decoded instructions per RAM word, invalidated on store to that word (fence_i still has to pass).
    *Accept:* `cargo test --release -- --include-ignored` all pass, and the `--png-at-frame 150` run reports ≥ 120 MIPS.
-5. **Web Worker** for the emulator loop, so the UI never stalls.
+5. **Web Worker** for the emulator loop, so the UI never stalls. (Done, polish step 5.)
    *Accept:* the smoke test still passes, and fps in the browser ≥ native-equivalent minus 20%.
 6. **Phone layout**.
    *Accept:* a Playwright run at a 390×844 viewport reports `document.documentElement.scrollWidth <= innerWidth`, and the canvas is fully visible in a screenshot.
