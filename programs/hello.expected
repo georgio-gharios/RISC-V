@@ -1,0 +1,5 @@
+hello from C
+counter = 42
+negative = -12345
+hex = 0xdeadbeef
+bss sum = 0

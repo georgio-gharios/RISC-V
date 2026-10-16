@@ -10,9 +10,10 @@ Hard stop after each phase. Do not start the next until told "next".
   *Accept:* all tests pass; pass/fail table printed.
   *Fallback:* write our own self-checking asm tests if riscv-tests can't be built.
   *Done:* 50/50 pass (42 rv32ui + 8 rv32um), riscv-tests @ d7e86f7, built with clang against a minimal no-CSR env. Runner verified to catch planted bugs.
-- [ ] **Phase 3: Bare-metal C toolchain** (crt0, linker script, Makefile) + examples (hello, ASCII mandelbrot, primes).
+- [x] **Phase 3: Bare-metal C toolchain** (crt0, linker script, Makefile) + examples (hello, ASCII mandelbrot, primes).
   *Accept:* all run correctly on the emulator.
   *Fallback:* use the alternate compiler (see Phase 0 table).
+  *Done:* clang+lld, no libc (crt0.S, link.ld, rt.c). hello, mandel (Q12 fixed point), primes output byte-identical to the host-compiled reference.
 - [ ] **Phase 4: Devices.** 320x200 framebuffer, keyboard register, ms timer; memory map documented in README.
   *Accept:* a C test program draws to the framebuffer and the PNG dump matches expectations.
   *Fallback:* drop keyboard/timer polish, keep framebuffer.

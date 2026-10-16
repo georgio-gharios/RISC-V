@@ -7,12 +7,31 @@ RV32IM emulator in Rust (work in progress). See PLAN.md.
 - `src/cpu.rs` – registers, pc, execute step
 - `src/mem.rs` – bus: RAM at 0x80000000 + device routing
 - `src/devices.rs` – UART
-- `programs/` – bare-metal test programs (built with clang + lld)
+- `programs/` – bare-metal programs: `crt0.S`, `link.ld`, `rt.c` (UART print helpers, memset/memcpy), examples
 
 ## Build / run
-    make -C programs              # needs clang, ld.lld, llvm-objcopy
+    cargo build --release
     cargo run --release -- programs/hello.bin [max_steps]
-    cargo test                    # unit tests + hello + all riscv-tests
+    cargo test --release          # unit tests, asm hello, C examples, all riscv-tests
+
+The emulator exits with the program's exit code (`main`'s return value).
+
+## C toolchain (bare metal, no libc)
+Needs `clang`, `ld.lld`, `llvm-objcopy` (Ubuntu: `apt-get install clang lld llvm`).
+
+    make -C programs              # builds hello_asm.bin, hello.bin, mandel.bin, primes.bin
+    make -C programs expected     # host-compiled reference output (*.expected), uses cc
+    cargo run --release -- programs/mandel.bin
+
+One program by hand (what the Makefile does):
+
+    cd programs
+    clang --target=riscv32 -march=rv32im -mabi=ilp32 -O2 -ffreestanding -nostdlib -fno-builtin \
+          -fuse-ld=lld -Wl,--no-relax -Wl,-T,link.ld crt0.S rt.c hello.c -o hello.elf
+    llvm-objcopy -O binary hello.elf hello.bin
+
+`crt0.S` sets sp to the top of RAM, zeroes .bss, calls `main`, then `ecall`s with its return value.
+Built `.bin` and `.expected` files are committed so `cargo test` works without the cross toolchain.
 
 ## Official riscv-tests (rv32ui + rv32um)
     ./scripts/build-riscv-tests.sh            # clones riscv-tests into third_party/, rebuilds tests/riscv-bin/*.bin
