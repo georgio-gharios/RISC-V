@@ -4,3 +4,8 @@ third_party/
 *.elf
 doom/obj/
 doom/doom.bin
+web/node_modules/
+web/package-lock.json
+web/www/doom.bin
+web/www/*.wasm
+web/www/programs/

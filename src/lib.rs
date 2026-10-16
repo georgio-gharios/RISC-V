@@ -1,6 +1,7 @@
 pub mod cpu;
 pub mod decode;
 pub mod devices;
+pub mod disasm;
 pub mod mem;
 pub mod png;
 

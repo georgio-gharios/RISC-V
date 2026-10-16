@@ -6,7 +6,9 @@ RV32IM emulator in Rust (work in progress). See PLAN.md.
 - `src/decode.rs` – 32-bit word → `Instr`
 - `src/cpu.rs` – registers, pc, execute step
 - `src/mem.rs` – bus: RAM at 0x80000000 + device routing
-- `src/devices.rs` – UART
+- `src/devices.rs` – UART, timer, keyboard, framebuffer
+- `src/disasm.rs`, `src/png.rs` – disassembler (browser panel), PNG writer
+- `web/` – WASM front end (`web/src/lib.rs` exports, `web/www/` static page)
 - `programs/` – bare-metal programs: `crt0.S`, `link.ld`, `rt.c` (UART print helpers, memset/memcpy), examples
 
 ## Build / run
@@ -101,3 +103,15 @@ installs `/usr/share/games/doom/doom1.wad`). Neither the WAD nor `doom.bin` is c
 Port files: `doom/doomgeneric_rvdoom.c` (DG_* hooks on our devices), `doom/syscalls.c` (UART stdio,
 in-memory read-only `doom1.wad`, other file ops fail), `doom/wad.S` (.incbin), `doom/link.ld` (heap = end of bss .. stack).
 Boot to first frame: ~260M instructions (~4.5 s); about 2.5M instructions per frame afterwards.
+
+## Browser (WASM)
+Plain `extern "C"` exports + a hand-written JS loader (no wasm-bindgen/wasm-pack: their binary
+download from GitHub is blocked here). Needs `rustup target add wasm32-unknown-unknown`.
+
+    ./web/build.sh                          # -> web/www/{rv_doom_web.wasm, programs/, doom.bin if built}
+    python3 -m http.server -d web/www 8000  # open http://localhost:8000
+    cd web && npm install && npm run smoke  # headless Chromium test (Playwright), checks Doom + Mandelbrot
+
+Controls: arrows move, Ctrl fire, Space use, Shift run, Alt strafe, Enter/Esc menu, Y to confirm.
+If `doom.bin` is not deployed, the page falls back to the Phase 3 programs. See `docs/web.png`.
+Speed: ~45-50 MIPS / ~20 fps in headless Chromium; ~79 MIPS natively.

@@ -1,0 +1,1 @@
+{"name":"rv-doom-web-test","private":true,"type":"module","scripts":{"smoke":"node smoke-test.mjs"},"devDependencies":{"playwright-core":"^1.56.1"}}

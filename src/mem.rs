@@ -82,6 +82,17 @@ impl Bus {
 
     /// Read `width` bytes (1, 2 or 4) little-endian.
     pub fn read(&mut self, addr: u32, width: u32) -> Result<u32, BusError> {
+        // Fast path: the whole access is in RAM (almost every access, including instruction fetch).
+        let i = addr.wrapping_sub(RAM_BASE) as usize;
+        if addr >= RAM_BASE && i + width as usize <= self.ram.len() {
+            let b = &self.ram[i..i + width as usize];
+            return Ok(match width {
+                1 => b[0] as u32,
+                2 => u16::from_le_bytes([b[0], b[1]]) as u32,
+                _ => u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+            });
+        }
+        // Slow path: devices, or an access that straddles a boundary.
         let mut v = 0u32;
         for k in 0..width {
             v |= (self.read8(addr.wrapping_add(k))? as u32) << (8 * k);
@@ -91,6 +102,11 @@ impl Bus {
 
     /// Write the low `width` bytes (1, 2 or 4) of `value` little-endian.
     pub fn write(&mut self, addr: u32, value: u32, width: u32) -> Result<(), BusError> {
+        let i = addr.wrapping_sub(RAM_BASE) as usize;
+        if addr >= RAM_BASE && i + width as usize <= self.ram.len() {
+            self.ram[i..i + width as usize].copy_from_slice(&value.to_le_bytes()[..width as usize]);
+            return Ok(());
+        }
         for k in 0..width {
             self.write8(addr.wrapping_add(k), (value >> (8 * k)) as u8)?;
         }

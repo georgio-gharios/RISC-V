@@ -22,9 +22,10 @@ Hard stop after each phase. Do not start the next until told "next".
   *Accept:* first rendered frame dumps to PNG.
   *Fallback:* ship Phase 3 programs in the browser.
   *Done:* first frame equals TITLEPIC+PLAYPAL (with Doom's gamma table) on all 64000 pixels (tests/phase5.rs, ignored by default). Demo renders in 3D (docs/doom-frame150.png). No emulator changes needed.
-- [ ] **Phase 6: WASM build.** Canvas rendering, keyboard input, side panel (registers, current disassembled instruction, instructions/sec).
+- [x] **Phase 6: WASM build.** Canvas rendering, keyboard input, side panel (registers, current disassembled instruction, instructions/sec).
   *Accept:* runs in a browser.
   *Fallback:* render without the side panel; or ship Phase 3 programs only.
+  *Done:* raw wasm32 exports (wasm-pack blocked), dark UI: MIPS/fps top, canvas left, registers + disassembly right, UART console. Headless Chromium smoke test passes (Doom boots, Enter opens menu, Mandelbrot fallback). Bus RAM fast path + no register snapshot: 54 -> 79 MIPS native.
 
 ## Phase 0 findings
 | Item | Status | Fallback / note |

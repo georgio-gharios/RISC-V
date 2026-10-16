@@ -8,3 +8,9 @@ default-run = "rv-doom"
 
 [dev-dependencies]
 png = "0.17"
+
+[workspace]
+members = [".", "web"]
+
+[profile.release]
+debug = false

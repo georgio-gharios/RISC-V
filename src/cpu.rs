@@ -79,7 +79,6 @@ impl Cpu {
 
         let word = self.bus.read(pc, 4).map_err(fault)?;
         let instr = decode(word).ok_or(Halt::IllegalInstruction { pc, word })?;
-        let r = self.regs; // snapshot of source registers
         let mut next_pc = pc.wrapping_add(4);
 
         match instr {
@@ -90,16 +89,17 @@ impl Cpu {
                 next_pc = pc.wrapping_add(imm as u32);
             }
             Instr::Jalr { rd, rs1, imm } => {
+                let target = self.regs[rs1].wrapping_add(imm as u32) & !1; // before writing rd (rd may equal rs1)
                 self.set(rd, next_pc);
-                next_pc = r[rs1].wrapping_add(imm as u32) & !1;
+                next_pc = target;
             }
             Instr::Branch { op, rs1, rs2, imm } => {
-                if branch_taken(op, r[rs1], r[rs2]) {
+                if branch_taken(op, self.regs[rs1], self.regs[rs2]) {
                     next_pc = pc.wrapping_add(imm as u32);
                 }
             }
             Instr::Load { op, rd, rs1, imm } => {
-                let addr = r[rs1].wrapping_add(imm as u32);
+                let addr = self.regs[rs1].wrapping_add(imm as u32);
                 let value = match op {
                     LoadOp::Lb => self.bus.read(addr, 1).map_err(fault)? as i8 as i32 as u32,
                     LoadOp::Lh => self.bus.read(addr, 2).map_err(fault)? as i16 as i32 as u32,
@@ -110,14 +110,14 @@ impl Cpu {
                 self.set(rd, value);
             }
             Instr::Store { op, rs1, rs2, imm } => {
-                let addr = r[rs1].wrapping_add(imm as u32);
+                let addr = self.regs[rs1].wrapping_add(imm as u32);
                 let width = match op { StoreOp::Sb => 1, StoreOp::Sh => 2, StoreOp::Sw => 4 };
-                self.bus.write(addr, r[rs2], width).map_err(fault)?;
+                self.bus.write(addr, self.regs[rs2], width).map_err(fault)?;
             }
-            Instr::OpImm { op, rd, rs1, imm } => self.set(rd, alu(op, r[rs1], imm as u32)),
-            Instr::Op { op, rd, rs1, rs2 } => self.set(rd, alu(op, r[rs1], r[rs2])),
+            Instr::OpImm { op, rd, rs1, imm } => self.set(rd, alu(op, self.regs[rs1], imm as u32)),
+            Instr::Op { op, rd, rs1, rs2 } => self.set(rd, alu(op, self.regs[rs1], self.regs[rs2])),
             Instr::Fence => {}
-            Instr::Ecall => return Err(Halt::Exit(r[10])),
+            Instr::Ecall => return Err(Halt::Exit(self.regs[10])),
             Instr::Ebreak => return Err(Halt::Ebreak),
         }
 
