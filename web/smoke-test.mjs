@@ -67,12 +67,17 @@ const guestKeys = () => page.evaluate(() => {
   const base = parseInt(window.rvSyms.gamekeydown, 16);
   return { right: wasm.peek(base + 4 * 0xae), fire: wasm.peek(base + 4 * 0xa3) };
 });
+// Poll rather than sleep: during the level-start screen wipe Doom processes no input at all.
+const waitKeys = (want) => page.waitForFunction((want) => {
+  const base = parseInt(window.rvSyms.gamekeydown, 16);
+  return wasm.peek(base + 4 * 0xae) === want && wasm.peek(base + 4 * 0xa3) === want;
+}, want, { timeout: 10000 }).catch(() => {});
 await page.keyboard.down("ArrowRight");
 await page.keyboard.down("Control");
-await page.waitForTimeout(500);
+await waitKeys(1);
 const whileHeld = await guestKeys();
 await page.evaluate(() => window.dispatchEvent(new Event("blur")));
-await page.waitForTimeout(500);
+await waitKeys(0);
 const afterBlur = await guestKeys();
 await page.keyboard.up("Control");
 await page.keyboard.up("ArrowRight");
