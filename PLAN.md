@@ -2,9 +2,10 @@
 
 Hard stop after each phase. Do not start the next until told "next".
 
-- [ ] **Phase 1: RV32I core.** Flat memory, UART at 0x10000000, raw binary loader.
+- [x] **Phase 1: RV32I core.** Flat memory, UART at 0x10000000, raw binary loader.
   *Accept:* a hand-assembled or tiny compiled program prints "hello" via the UART.
   *Fallback:* hand-assemble words in a Rust test if no compiler works.
+  *Done:* `programs/hello.S` (clang-assembled) prints "hello" via UART; `cargo test` passes.
 - [ ] **Phase 2: M extension + riscv-tests runner** (rv32ui, rv32um).
   *Accept:* all tests pass; pass/fail table printed.
   *Fallback:* write our own self-checking asm tests if riscv-tests can't be built.
