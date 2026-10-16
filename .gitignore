@@ -2,3 +2,5 @@ target/
 third_party/
 *.o
 *.elf
+doom/obj/
+doom/doom.bin

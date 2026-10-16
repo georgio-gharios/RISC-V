@@ -1,0 +1,17 @@
+# meson cross file: picolibc for rv-doom (clang, rv32im, ilp32 soft-float)
+[binaries]
+c = ['clang', '--target=riscv32-unknown-elf', '-march=rv32im', '-mabi=ilp32', '-nostdlib']
+c_ld = 'lld'
+ar = 'llvm-ar'
+as = 'clang'
+nm = 'llvm-nm'
+strip = 'llvm-strip'
+
+[host_machine]
+system = 'none'
+cpu_family = 'riscv32'
+cpu = 'riscv'
+endian = 'little'
+
+[properties]
+skip_sanity_check = true

@@ -86,3 +86,18 @@ They use a minimal env (`tests/riscv-env/riscv_test.h`): pass = `ecall` with a0=
 | 0x80000000 | RAM (64 MiB). Raw binary loaded here, pc starts here, sp = top of RAM |
 
 `ecall` halts with exit code = a0. `ebreak` halts.
+
+## Doom (doomgeneric + picolibc)
+Prereqs: clang/lld/llvm, `pip install meson`, ninja, and the shareware WAD (`apt-get install doom-wad-shareware`,
+installs `/usr/share/games/doom/doom1.wad`). Neither the WAD nor `doom.bin` is committed.
+
+    git clone https://github.com/ozkl/doomgeneric third_party/doomgeneric
+    ./doom/build-picolibc.sh       # minimal picolibc for rv32im -> third_party/picolibc-install
+    ./doom/build-builtins.sh       # compiler-rt builtins (64-bit div, soft float) -> third_party/builtins
+    make -C doom -j8               # -> doom/doom.bin (WAD embedded; override with WAD=path)
+    cargo run --release -- doom/doom.bin --png-at-frame 1 --png frame1.png
+    cargo test --release -- --include-ignored   # includes the Doom first-frame test
+
+Port files: `doom/doomgeneric_rvdoom.c` (DG_* hooks on our devices), `doom/syscalls.c` (UART stdio,
+in-memory read-only `doom1.wad`, other file ops fail), `doom/wad.S` (.incbin), `doom/link.ld` (heap = end of bss .. stack).
+Boot to first frame: ~260M instructions (~4.5 s); about 2.5M instructions per frame afterwards.

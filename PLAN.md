@@ -18,9 +18,10 @@ Hard stop after each phase. Do not start the next until told "next".
   *Accept:* a C test program draws to the framebuffer and the PNG dump matches expectations.
   *Fallback:* drop keyboard/timer polish, keep framebuffer.
   *Done:* fbtest.c pattern checked pixel-by-pixel in tests/phase4.rs, PNG decoded with the png crate and compared; devtest.c checks timer wait + keyboard queue. ~55-60 MIPS (release).
-- [ ] **Phase 5: doomgeneric port** with picolibc and doom1.wad embedded in memory.
+- [x] **Phase 5: doomgeneric port** with picolibc and doom1.wad embedded in memory.
   *Accept:* first rendered frame dumps to PNG.
   *Fallback:* ship Phase 3 programs in the browser.
+  *Done:* first frame equals TITLEPIC+PLAYPAL (with Doom's gamma table) on all 64000 pixels (tests/phase5.rs, ignored by default). Demo renders in 3D (docs/doom-frame150.png). No emulator changes needed.
 - [ ] **Phase 6: WASM build.** Canvas rendering, keyboard input, side panel (registers, current disassembled instruction, instructions/sec).
   *Accept:* runs in a browser.
   *Fallback:* render without the side panel; or ship Phase 3 programs only.
