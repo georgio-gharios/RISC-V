@@ -6,9 +6,10 @@ Hard stop after each phase. Do not start the next until told "next".
   *Accept:* a hand-assembled or tiny compiled program prints "hello" via the UART.
   *Fallback:* hand-assemble words in a Rust test if no compiler works.
   *Done:* `programs/hello.S` (clang-assembled) prints "hello" via UART; `cargo test` passes.
-- [ ] **Phase 2: M extension + riscv-tests runner** (rv32ui, rv32um).
+- [x] **Phase 2: M extension + riscv-tests runner** (rv32ui, rv32um).
   *Accept:* all tests pass; pass/fail table printed.
   *Fallback:* write our own self-checking asm tests if riscv-tests can't be built.
+  *Done:* 50/50 pass (42 rv32ui + 8 rv32um), riscv-tests @ d7e86f7, built with clang against a minimal no-CSR env. Runner verified to catch planted bugs.
 - [ ] **Phase 3: Bare-metal C toolchain** (crt0, linker script, Makefile) + examples (hello, ASCII mandelbrot, primes).
   *Accept:* all run correctly on the emulator.
   *Fallback:* use the alternate compiler (see Phase 0 table).

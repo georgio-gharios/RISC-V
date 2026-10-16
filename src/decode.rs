@@ -9,7 +9,11 @@
 //!   J: like U, but the immediate bits are shuffled and it counts in 2-byte units
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AluOp { Add, Sub, Sll, Slt, Sltu, Xor, Srl, Sra, Or, And }
+pub enum AluOp {
+    Add, Sub, Sll, Slt, Sltu, Xor, Srl, Sra, Or, And,
+    // M extension (register-register only)
+    Mul, Mulh, Mulhsu, Mulhu, Div, Divu, Rem, Remu,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BranchOp { Eq, Ne, Lt, Ge, Ltu, Geu }
@@ -132,6 +136,15 @@ pub fn decode(i: u32) -> Option<Instr> {
                 (5, 0x20) => AluOp::Sra,
                 (6, 0x00) => AluOp::Or,
                 (7, 0x00) => AluOp::And,
+                // M extension: funct7 = 1
+                (0, 0x01) => AluOp::Mul,
+                (1, 0x01) => AluOp::Mulh,
+                (2, 0x01) => AluOp::Mulhsu,
+                (3, 0x01) => AluOp::Mulhu,
+                (4, 0x01) => AluOp::Div,
+                (5, 0x01) => AluOp::Divu,
+                (6, 0x01) => AluOp::Rem,
+                (7, 0x01) => AluOp::Remu,
                 _ => return None,
             };
             Op { op, rd, rs1, rs2 }
@@ -168,6 +181,9 @@ mod tests {
         assert_eq!(decode(0x40355513), Some(Instr::OpImm { op: AluOp::Sra, rd: 10, rs1: 10, imm: 3 }));
         // sw a1, -4(sp)
         assert_eq!(decode(0xfeb12e23), Some(Instr::Store { op: StoreOp::Sw, rs1: 2, rs2: 11, imm: -4 }));
+        // mul a4, a1, a2 / remu a4, a1, a2
+        assert_eq!(decode(0x02c58733), Some(Instr::Op { op: AluOp::Mul, rd: 14, rs1: 11, rs2: 12 }));
+        assert_eq!(decode(0x02c5f733), Some(Instr::Op { op: AluOp::Remu, rd: 14, rs1: 11, rs2: 12 }));
         assert_eq!(decode(0), None);
     }
 }

@@ -31,6 +31,24 @@ fn alu(op: AluOp, a: u32, b: u32) -> u32 {
         AluOp::Xor => a ^ b,
         AluOp::Or => a | b,
         AluOp::And => a & b,
+
+        // M extension. The high-half multiplies widen to 64 bits first.
+        AluOp::Mul => a.wrapping_mul(b),
+        AluOp::Mulh => ((a as i32 as i64 * b as i32 as i64) >> 32) as u32,
+        AluOp::Mulhsu => ((a as i32 as i64 * b as i64) >> 32) as u32,
+        AluOp::Mulhu => ((a as u64 * b as u64) >> 32) as u32,
+        // Division never traps in RISC-V. Divide by zero: quotient = all ones,
+        // remainder = dividend. Overflow (i32::MIN / -1): quotient = i32::MIN, remainder = 0.
+        AluOp::Div => match b {
+            0 => u32::MAX,
+            _ => (a as i32).wrapping_div(b as i32) as u32,
+        },
+        AluOp::Divu => a.checked_div(b).unwrap_or(u32::MAX),
+        AluOp::Rem => match b {
+            0 => a,
+            _ => (a as i32).wrapping_rem(b as i32) as u32,
+        },
+        AluOp::Remu => a.checked_rem(b).unwrap_or(a),
     }
 }
 

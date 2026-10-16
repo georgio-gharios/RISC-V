@@ -12,7 +12,13 @@ RV32IM emulator in Rust (work in progress). See PLAN.md.
 ## Build / run
     make -C programs              # needs clang, ld.lld, llvm-objcopy
     cargo run --release -- programs/hello.bin [max_steps]
-    cargo test
+    cargo test                    # unit tests + hello + all riscv-tests
+
+## Official riscv-tests (rv32ui + rv32um)
+    ./scripts/build-riscv-tests.sh            # clones riscv-tests into third_party/, rebuilds tests/riscv-bin/*.bin
+    cargo run --release --bin riscv-tests     # prints pass/fail table
+The prebuilt binaries in `tests/riscv-bin/` are committed, so `cargo test` needs no cross toolchain.
+They use a minimal env (`tests/riscv-env/riscv_test.h`): pass = `ecall` with a0=0, fail = `ecall` with a0=(test#<<1)|1.
 
 ## Machine
 | Address | What |
