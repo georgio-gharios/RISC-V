@@ -40,6 +40,8 @@ const dbg = {
   keys: [], sent: 0,                       // key log, events queued since load
   win: null,                               // start of the current 1 s measurement window
   raf: 0, draws: 0, runMs: 0, maxJump: 0, lastTimer: 0,
+  t: { emu: 0, rgba: 0, put: 0, ui: 0, interval: 0 }, lastRaf: 0,  // ms per window, see tick()
+  waitRanges: [], pcSamples: 0, pcWait: 0,  // pc sampled after each run() slice
   load: null,                              // {wall, timer} at program load
   tic0: null,                              // {wall, tic} when gametic was first seen non-zero
   snap: {},
@@ -63,8 +65,11 @@ async function loadProgram(path) {
 }
 
 function draw() {
+  const t0 = performance.now();
   image.data.set(new Uint8Array(wasm.memory.buffer, wasm.frame_rgba(), 320 * 200 * 4));
+  const t1 = performance.now();
   ctx.putImageData(image, 0, 0);
+  dbg.t.rgba += t1 - t0; dbg.t.put += performance.now() - t1;
 }
 
 function drainConsole() {
@@ -120,6 +125,14 @@ function keyLine(k) {
   return `${t}s ${k.type.padEnd(4)} ${k.code.padEnd(11)} ${(k.mods || "-").padEnd(10)} ${k.repeat ? "rep" : "   "} ${doom} ${fate}`;
 }
 
+// Is the guest waiting on the clock (DG_SleepMs, I_GetTime ...) rather than doing work?
+function samplePc() {
+  if (!dbg.isDoom || !dbg.waitRanges.length) return;
+  const pc = new Uint32Array(wasm.memory.buffer, wasm.regs(), 33)[32];
+  dbg.pcSamples++;
+  if (dbg.waitRanges.some(([lo, len]) => pc >= lo && pc < lo + len)) dbg.pcWait++;
+}
+
 // Called once per animation frame with the guest timer jump seen by this frame's slices.
 function debugSample(sliceMs, newFrame) {
   const now = performance.now();  // not the rAF timestamp: it is stale on the first frame after a load
@@ -144,10 +157,23 @@ function debugSample(sliceMs, newFrame) {
       gametic: tic,
       keys: dbg.keys.map(keyLine),
       held: [...held],
+      // Per animation frame, in ms (averaged over the window). idle = rAF interval minus our JS work:
+      // browser compositing, GC and true idle time are all in there.
+      perRaf: (() => {
+        const n = dbg.raf || 1, t = dbg.t, avg = (v) => v / n;
+        const interval = t.interval / n;
+        return { interval, emu: avg(t.emu), rgba: avg(t.rgba), put: avg(t.put), ui: avg(t.ui),
+                 idle: interval - avg(t.emu + t.rgba + t.put + t.ui) };
+      })(),
+      instrPerRaf: (wasm.instret() - w.instret) / (dbg.raf || 1),
+      mipsWhileRunning: (wasm.instret() - w.instret) / dbg.t.emu / 1e3,
+      instrPerGuestFrame: wasm.frames() > w.frames ? (wasm.instret() - w.instret) / (wasm.frames() - w.frames) : null,
+      waitShare: dbg.pcSamples ? dbg.pcWait / dbg.pcSamples : null,
     };
     window.rvDebug = s;
     dbg.win = { t: now, instret: wasm.instret(), frames: wasm.frames(), tic };
-    dbg.raf = dbg.draws = dbg.runMs = dbg.maxJump = 0;
+    dbg.raf = dbg.draws = dbg.runMs = dbg.maxJump = dbg.pcSamples = dbg.pcWait = 0;
+    dbg.t = { emu: 0, rgba: 0, put: 0, ui: 0, interval: 0 };
   }
   if (dbg.on) renderDebug();
 }
@@ -159,6 +185,10 @@ function renderDebug() {
   el.textContent = [
     `display  ${f(s.rafFps)} rAF/s   ${f(s.drawFps)} new frames drawn/s   guest ${f(s.guestFps)} fps`,
     `emulator ${f(s.mips)} MIPS   guest ran ${f(100 * s.cpuShare, 0)}% of wall time`,
+    `per rAF  ${f(s.perRaf?.interval)} ms = emu ${f(s.perRaf?.emu)} + rgba ${f(s.perRaf?.rgba, 2)} + putImage ${f(s.perRaf?.put, 2)}` +
+      ` + ui ${f(s.perRaf?.ui, 2)} + idle ${f(s.perRaf?.idle)}`,
+    `budget   ${f(s.instrPerRaf / 1e6, 2)}M instr/rAF at ${f(s.mipsWhileRunning)} MIPS while running   ` +
+      `${f(s.instrPerGuestFrame / 1e6, 2)}M instr/guest frame   waiting on clock ${f(100 * s.waitShare, 1)}%`,
     `timer    guest-vs-wall drift ${f(s.clockDriftMs, 0)} ms   max clock jump ${f(s.maxJumpMs, 0)} ms`,
     `doom     gametic ${s.gametic ?? "n/a"}   ${f(s.ticsPerSec)} tics/s (want 35)   game-time drift ${f(s.gameDriftMs, 0)} ms`,
     `held     ${s.held?.length ? s.held.map((c) => "0x" + c.toString(16)).join(" ") : "-"}`,
@@ -177,11 +207,18 @@ function tick(now) {
       if (dbg.lastTimer) dbg.maxJump = Math.max(dbg.maxJump, t - dbg.lastTimer);
       dbg.lastTimer = t;
       halted = wasm.run(100000, t) !== 0;
+      samplePc();
     } while (!halted && performance.now() - start < 12);
-    debugSample(performance.now() - start, wasm.frames() !== frames0);
+    const emuEnd = performance.now();
     draw();
+    const uiStart = performance.now();
     drainConsole();
     if (now - lastPanel > 100 || halted) { updatePanel(); lastPanel = now; }
+    dbg.t.emu += emuEnd - start;
+    if (dbg.lastRaf) dbg.t.interval += now - dbg.lastRaf;
+    dbg.lastRaf = now;
+    debugSample(emuEnd - start, wasm.frames() !== frames0);
+    dbg.t.ui += performance.now() - uiStart;  // console, panel, overlay
   }
   updateStats(now);
   requestAnimationFrame(tick);
@@ -246,7 +283,11 @@ async function main() {
   document.addEventListener("visibilitychange", () => { if (document.hidden) releaseAll("hidden"); });
 
   fetch("doom.syms.json").then((r) => r.json())
-    .then((syms) => { dbg.gameticAddr = parseInt(syms.gametic, 16) || 0; window.rvSyms = syms; }).catch(() => {});
+    .then((syms) => {
+      dbg.gameticAddr = parseInt(syms.gametic, 16) || 0;
+      dbg.waitRanges = (syms.wait ?? []).map(([a, n]) => [parseInt(a, 16), parseInt(n, 16)]);
+      window.rvSyms = syms;
+    }).catch(() => {});
   // Default to Doom; fall back to the Phase 3 programs if doom.bin isn't deployed.
   try { await loadProgram(PROGRAMS[0][0]); }
   catch (e) { select.value = PROGRAMS[1][0]; await loadProgram(select.value).catch(showError); }

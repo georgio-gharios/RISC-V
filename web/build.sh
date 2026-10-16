@@ -10,6 +10,8 @@ if [ -f doom/doom.bin ]; then
   cp doom/doom.bin web/www/
   # Symbol addresses for the debug overlay and smoke test (game tic counter, Doom's key-state array).
   sym() { llvm-nm doom/doom.elf | awk -v n="$1" '$3 == n { print $1 }'; }
-  echo "{\"gametic\": \"$(sym gametic)\", \"gamekeydown\": \"$(sym gamekeydown)\"}" > web/www/doom.syms.json
+  # Functions where the guest only waits on the clock: [address, size] pairs (hex).
+  wait=$(llvm-nm -S doom/doom.elf | awk '$4 ~ /^(DG_SleepMs|DG_GetTicksMs|I_GetTime|I_Sleep)$/ { printf "%s[\"%s\", \"%s\"]", s, $1, $2; s = ", " }')
+  echo "{\"gametic\": \"$(sym gametic)\", \"gamekeydown\": \"$(sym gamekeydown)\", \"wait\": [$wait]}" > web/www/doom.syms.json
 else echo "note: doom/doom.bin not built; Doom entry will fall back"; fi
 echo "built web/www. Serve: python3 -m http.server -d web/www 8000"

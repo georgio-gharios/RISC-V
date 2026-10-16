@@ -51,6 +51,12 @@ Hard stop after each phase. Do not start the next until told "next".
   *Verified:* `npm run smoke` reads Doom's `gamekeydown[]`: Right+Ctrl = 1/1 while held, 0/0 after a window blur;
   ArrowDown on the focused dropdown reaches the guest and leaves it on Doom. Against the old main.js these checks
   fail (ArrowDown switched the program to Mandelbrot, resetting Doom).
+- [x] **Step 3: frame-time breakdown (measure only).** Overlay adds per-rAF split, instr budget, guest wait share.
+  *Measured (headless):* per 16.7 ms rAF: emulation 12.8, rgba convert 0.1, putImageData 0.03, UI 0.1, idle 3.5.
+  0.66-0.76M instr/rAF at 51-59 MIPS while running; Doom needs 2.3M instr/frame (title), 3.3M (E1M1) -> 12-14 fps
+  in game. Guest waits on the clock 0-4% of the time, so it is CPU-bound. Native: 73-88 MIPS; on a real trace,
+  isolated fetch ~3 ns + decode ~9 ns vs 11.3 ns per full step (overlap, so decode share is uncertain).
+  35 fps in E1M1 needs ~115 MIPS while running (~2x). Ranking in the step 3 report: decode cache, then Web Worker.
 
 ## Next (not started; see HANDOFF.md §6 for acceptance tests)
 - [ ] Gameplay smoke test (fire/move in E1M1), verifies hypothesis A (input)
