@@ -59,10 +59,42 @@ if (!state.disasm.startsWith(state.pc + ":")) fail(`disasm doesn't match pc: ${s
 if (state.status) fail(`machine halted: ${state.status}`);
 if (!state.console.includes("I_InitGraphics")) fail("Doom console output missing");
 
+// Stuck keys: start E1M1, hold Right+Ctrl, blur the window, and check Doom's own key state
+// (gamekeydown[], int array, address from doom.syms.json) shows both pressed, then both released.
+for (let i = 0; i < 3; i++) { await page.keyboard.press("Enter"); await page.waitForTimeout(400); } // new game, E1, skill
+await page.waitForTimeout(2000);
+const guestKeys = () => page.evaluate(() => {
+  const base = parseInt(window.rvSyms.gamekeydown, 16);
+  return { right: wasm.peek(base + 4 * 0xae), fire: wasm.peek(base + 4 * 0xa3) };
+});
+await page.keyboard.down("ArrowRight");
+await page.keyboard.down("Control");
+await page.waitForTimeout(500);
+const whileHeld = await guestKeys();
+await page.evaluate(() => window.dispatchEvent(new Event("blur")));
+await page.waitForTimeout(500);
+const afterBlur = await guestKeys();
+await page.keyboard.up("Control");
+await page.keyboard.up("ArrowRight");
+console.log("guest gamekeydown while held:", whileHeld, "after blur:", afterBlur);
+if (whileHeld.right !== 1 || whileHeld.fire !== 1) fail("Right+Ctrl did not reach the guest");
+if (afterBlur.right !== 0 || afterBlur.fire !== 0) fail("keys still held in the guest after window blur");
+
+// Dropdown focus: arrow keys must go to the game, not change the selected program.
+const delivered0 = await page.evaluate(() => wasm.keys_delivered());
+await page.focus("#program");
+await page.keyboard.press("ArrowDown");
+await page.waitForTimeout(300);
+const dd = await page.evaluate(() => ({ value: document.getElementById("program").value, delivered: wasm.keys_delivered() }));
+console.log("dropdown after ArrowDown:", dd.value, "guest key events:", dd.delivered - delivered0);
+if (dd.value !== "doom.bin") fail("ArrowDown on the focused dropdown changed the program");
+if (dd.delivered - delivered0 !== 2) fail("ArrowDown on the focused dropdown did not reach the guest");
+
 // Fallback programs: switch to Mandelbrot and check its UART output reaches the console.
 await page.selectOption("#program", "programs/mandel.bin");
 await page.waitForFunction(() => document.getElementById("status").textContent.includes("exited with code 0"),
   null, { timeout: 30000 });
+if (await page.evaluate(() => document.activeElement.id === "program")) fail("dropdown kept focus after a selection");
 const mandel = await page.evaluate(() => document.getElementById("console").textContent);
 console.log(mandel.split("\n").slice(10, 16).join("\n"));
 if (mandel.split("\n").filter((l) => l.length === 72).length !== 28) fail("mandelbrot output wrong");

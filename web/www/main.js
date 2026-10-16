@@ -27,6 +27,7 @@ const image = ctx.createImageData(320, 200);
 const decoder = new TextDecoder();
 
 let wasm, running = true, halted = false;
+const held = new Set();  // Doom keycodes currently down in the guest
 let lastStats = { t: 0, instret: 0, frames: 0 };
 let prevRegs = new Uint32Array(33);
 
@@ -36,7 +37,7 @@ const DEBUG_KEY = "Backquote";  // unused by Doom; never forwarded to the guest
 const dbg = {
   on: new URLSearchParams(location.search).has("debug"),
   gameticAddr: 0,
-  keys: [], held: new Map(), sent: 0,      // key log, keys down in the guest, events queued since load
+  keys: [], sent: 0,                       // key log, events queued since load
   win: null,                               // start of the current 1 s measurement window
   raf: 0, draws: 0, runMs: 0, maxJump: 0, lastTimer: 0,
   load: null,                              // {wall, timer} at program load
@@ -56,7 +57,7 @@ async function loadProgram(path) {
   $("console").textContent = "";
   halted = false;
   dbg.isDoom = path === "doom.bin";
-  dbg.load = null; dbg.tic0 = null; dbg.sent = 0; dbg.held.clear(); dbg.keys = []; dbg.win = null;
+  dbg.load = null; dbg.tic0 = null; dbg.sent = 0; held.clear(); dbg.keys = []; dbg.win = null;
   lastStats = { t: performance.now(), instret: 0, frames: 0 };
   draw(); updatePanel();
 }
@@ -142,7 +143,7 @@ function debugSample(sliceMs, newFrame) {
       gameDriftMs: dbg.tic0 ? (tic - dbg.tic0.tic) * 1000 / 35 - (now - dbg.tic0.wall) : null,
       gametic: tic,
       keys: dbg.keys.map(keyLine),
-      held: [...dbg.held.keys()],
+      held: [...held],
     };
     window.rvDebug = s;
     dbg.win = { t: now, instret: wasm.instret(), frames: wasm.frames(), tic };
@@ -199,7 +200,8 @@ async function main() {
 
   const select = $("program");
   for (const [path, label] of PROGRAMS) select.add(new Option(label, path));
-  select.onchange = () => loadProgram(select.value).catch(showError);
+  // Blur after a pick so the dropdown never keeps focus (and arrow keys) during play.
+  select.onchange = () => { select.blur(); canvas.focus(); loadProgram(select.value).catch(showError); };
   $("run").onclick = () => setRunning(!running);
   $("reset").onclick = () => loadProgram(select.value).catch(showError);
   $("step").onclick = () => {
@@ -208,26 +210,43 @@ async function main() {
     draw(); drainConsole(); updatePanel();
   };
 
+  // Game keys are routed at the document level in the capture phase, whatever has focus,
+  // so a focused dropdown or button never sees (or acts on) them.
   for (const type of ["keydown", "keyup"]) {
-    window.addEventListener(type, (e) => {
+    document.addEventListener(type, (e) => {
       if (e.code === DEBUG_KEY) {
         e.preventDefault();
         if (type === "keydown" && !e.repeat) { dbg.on = !dbg.on; $("debug").hidden = !dbg.on; if (dbg.on) renderDebug(); }
         return;
       }
       const code = doomKey(e);
-      if (e.target === select) return logKey(e, code, "select focused");
       if (!code) return logKey(e, code, "unmapped");
       e.preventDefault();
-      if (type === "keydown" && e.repeat) return logKey(e, code, "repeat");
+      e.stopPropagation();
+      const down = type === "keydown";
+      // A repeat of a key we already released (e.g. held across a blur) counts as a fresh press.
+      if (down && e.repeat && held.has(code)) return logKey(e, code, "repeat");
+      if (!down && !held.has(code)) return logKey(e, code, "not held");
       logKey(e, code, "sent");
-      if (type === "keydown") dbg.held.set(code, true); else dbg.held.delete(code);
-      wasm.key(code, type === "keydown" ? 1 : 0);
-    });
+      if (down) held.add(code); else held.delete(code);
+      wasm.key(code, down ? 1 : 0);
+    }, { capture: true });
   }
 
+  // Keyups that happen while the page has no focus are never delivered, so release everything.
+  const releaseAll = (why) => {
+    for (const code of held) {
+      logKey({ type: "keyup", code: "(" + why + ")", key: "", repeat: false }, code, "sent");
+      wasm.key(code, 0);
+    }
+    held.clear();
+  };
+  window.addEventListener("blur", () => releaseAll("blur"));
+  window.addEventListener("pagehide", () => releaseAll("pagehide"));
+  document.addEventListener("visibilitychange", () => { if (document.hidden) releaseAll("hidden"); });
+
   fetch("doom.syms.json").then((r) => r.json())
-    .then((syms) => { dbg.gameticAddr = parseInt(syms.gametic, 16) || 0; }).catch(() => {});
+    .then((syms) => { dbg.gameticAddr = parseInt(syms.gametic, 16) || 0; window.rvSyms = syms; }).catch(() => {});
   // Default to Doom; fall back to the Phase 3 programs if doom.bin isn't deployed.
   try { await loadProgram(PROGRAMS[0][0]); }
   catch (e) { select.value = PROGRAMS[1][0]; await loadProgram(select.value).catch(showError); }

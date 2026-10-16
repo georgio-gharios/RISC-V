@@ -8,8 +8,8 @@ mkdir -p web/www/programs
 cp programs/mandel.bin programs/primes.bin programs/hello.bin programs/fbtest.bin web/www/programs/
 if [ -f doom/doom.bin ]; then
   cp doom/doom.bin web/www/
-  # Symbol addresses for the debug overlay (Doom's game tic counter).
-  addr=$(llvm-nm doom/doom.elf | awk '$3 == "gametic" { print $1 }')
-  echo "{\"gametic\": \"$addr\"}" > web/www/doom.syms.json
+  # Symbol addresses for the debug overlay and smoke test (game tic counter, Doom's key-state array).
+  sym() { llvm-nm doom/doom.elf | awk -v n="$1" '$3 == n { print $1 }'; }
+  echo "{\"gametic\": \"$(sym gametic)\", \"gamekeydown\": \"$(sym gamekeydown)\"}" > web/www/doom.syms.json
 else echo "note: doom/doom.bin not built; Doom entry will fall back"; fi
 echo "built web/www. Serve: python3 -m http.server -d web/www 8000"

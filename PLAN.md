@@ -46,9 +46,13 @@ Hard stop after each phase. Do not start the next until told "next".
   guest clock = wall clock (drift 0 ms, max jump 7-10 ms), gametic 34-37 tics/s, but game time is ~1.8 s behind
   wall time after starting E1M1 (lost during the level start, never caught up). All sent key events were
   delivered; repeats and unmapped keys are dropped as intended; Ctrl fired (ammo 50 -> 48). Screenshot: docs/debug-overlay.png.
+- [x] **Step 2: focus and stuck keys.** Game keys handled at the document level (capture phase) whatever has
+  focus; dropdown blurs after a pick; all held keys released on window blur, pagehide and tab hide.
+  *Verified:* `npm run smoke` reads Doom's `gamekeydown[]`: Right+Ctrl = 1/1 while held, 0/0 after a window blur;
+  ArrowDown on the focused dropdown reaches the guest and leaves it on Doom. Against the old main.js these checks
+  fail (ArrowDown switched the program to Mandelbrot, resetting Doom).
 
 ## Next (not started; see HANDOFF.md §6 for acceptance tests)
-- [ ] Fix dropdown focus eating arrow keys + release keys on window blur
 - [ ] Gameplay smoke test (fire/move in E1M1), verifies hypothesis A (input)
 - [ ] Measure game speed via `gametic` (35 tics/s), verifies hypothesis B (timing)
 - [ ] Decoded-instruction cache (target >= 120 MIPS native)
