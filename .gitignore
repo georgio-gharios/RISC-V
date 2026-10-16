@@ -9,3 +9,4 @@ web/package-lock.json
 web/www/doom.bin
 web/www/*.wasm
 web/www/programs/
+web/www/doom.syms.json
