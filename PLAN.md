@@ -5,7 +5,7 @@ Hard stop after each phase. Do not start the next until told "next".
 - [x] **Phase 1: RV32I core.** Flat memory, UART at 0x10000000, raw binary loader.
   *Accept:* a hand-assembled or tiny compiled program prints "hello" via the UART.
   *Fallback:* hand-assemble words in a Rust test if no compiler works.
-  *Done:* `programs/hello.S` (clang-assembled) prints "hello" via UART; `cargo test` passes.
+  *Done:* `programs/hello_asm.S` (clang-assembled, renamed from hello.S in Phase 3) prints "hello" via UART; `cargo test` passes.
 - [x] **Phase 2: M extension + riscv-tests runner** (rv32ui, rv32um).
   *Accept:* all tests pass; pass/fail table printed.
   *Fallback:* write our own self-checking asm tests if riscv-tests can't be built.
@@ -25,17 +25,25 @@ Hard stop after each phase. Do not start the next until told "next".
 - [x] **Phase 6: WASM build.** Canvas rendering, keyboard input, side panel (registers, current disassembled instruction, instructions/sec).
   *Accept:* runs in a browser.
   *Fallback:* render without the side panel; or ship Phase 3 programs only.
-  *Done:* raw wasm32 exports (wasm-pack blocked), dark UI: MIPS/fps top, canvas left, registers + disassembly right, UART console. Headless Chromium smoke test passes (Doom boots, Enter opens menu, Mandelbrot fallback). Bus RAM fast path + no register snapshot: 54 -> 79 MIPS native.
+  *Done:* raw wasm32 exports (wasm-pack blocked), dark UI: MIPS/fps top, canvas left, registers + disassembly right, UART console. Headless Chromium smoke test passes (Doom boots, Enter opens menu, Mandelbrot fallback). Bus RAM fast path + no register snapshot: 54 -> 79 MIPS native. Verified headless only; real gameplay, phone layout and dropdown focus are unverified (see HANDOFF.md §4).
 
 ## Phase 0 findings
 | Item | Status | Fallback / note |
 |---|---|---|
 | rustc/cargo 1.97 | OK | |
 | wasm32-unknown-unknown target | OK (installed) | |
-| wasm-pack 0.15 | OK (installed via cargo) | |
+| wasm-pack 0.15 | Installed, but unusable: it downloads wasm-bindgen from GitHub releases (blocked) | plain `extern "C"` wasm exports instead |
 | RISC-V compiler | `clang --target=riscv32` (v18) compiles; `ld.lld`, `llvm-objcopy` present. `riscv64-linux-gnu-gcc` installed via apt, works with `-march=rv32im -mabi=ilp32 -nostdlib` | Prefer clang+lld; gcc as alternate. No `riscv64-unknown-elf-gcc` package |
 | riscv-tests | OK: `git clone` works (github.com HTTPS/codeload tarballs return 403; git clone and raw.githubusercontent.com work) | clone into `third_party/` (gitignored) |
 | doomgeneric | OK via git clone | |
 | picolibc | OK via git clone (source only; must build for rv32im ourselves) | newlib not checked; or write minimal libc |
-| doom1.wad | Not fetched yet: archive.org/doomworld/ibiblio blocked; apt has `doom-wad-shareware` and `freedoom`; a raw.githubusercontent mirror returned 200 | use apt package |
+| doom1.wad | archive.org/doomworld/ibiblio blocked | `apt-get install doom-wad-shareware` (used; v1.9, sha1 5b2e249b) |
 
+
+## Next (not started; see HANDOFF.md §6 for acceptance tests)
+- [ ] Fix dropdown focus eating arrow keys + release keys on window blur
+- [ ] Gameplay smoke test (fire/move in E1M1), verifies hypothesis A (input)
+- [ ] Measure game speed via `gametic` (35 tics/s), verifies hypothesis B (timing)
+- [ ] Decoded-instruction cache (target >= 120 MIPS native)
+- [ ] Emulator in a Web Worker
+- [ ] Phone-width layout check
