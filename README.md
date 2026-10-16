@@ -110,6 +110,9 @@ download from GitHub is blocked here). Needs `rustup target add wasm32-unknown-u
 
     ./web/build.sh                          # -> web/www/{rv_doom_web.wasm, programs/, doom.bin if built}
     python3 -m http.server -d web/www 8000  # open http://localhost:8000
+
+Prebuilt copy (no toolchain needed): `dist/` is `web/www` after `./web/build.sh`, committed. Serve it with
+`npx serve dist` or `python3 -m http.server -d dist 8000`. Refresh it with `./web/build.sh && rm -rf dist && cp -r web/www dist`.
     cd web && npm install && npm run smoke  # headless Chromium test (Playwright), checks Doom + Mandelbrot
     cd web && npm run measure                # headless run that prints the debug overlay (fps, MIPS, timer drift, key log)
 
