@@ -14,9 +14,10 @@ Hard stop after each phase. Do not start the next until told "next".
   *Accept:* all run correctly on the emulator.
   *Fallback:* use the alternate compiler (see Phase 0 table).
   *Done:* clang+lld, no libc (crt0.S, link.ld, rt.c). hello, mandel (Q12 fixed point), primes output byte-identical to the host-compiled reference.
-- [ ] **Phase 4: Devices.** 320x200 framebuffer, keyboard register, ms timer; memory map documented in README.
+- [x] **Phase 4: Devices.** 320x200 framebuffer, keyboard register, ms timer; memory map documented in README.
   *Accept:* a C test program draws to the framebuffer and the PNG dump matches expectations.
   *Fallback:* drop keyboard/timer polish, keep framebuffer.
+  *Done:* fbtest.c pattern checked pixel-by-pixel in tests/phase4.rs, PNG decoded with the png crate and compared; devtest.c checks timer wait + keyboard queue. ~55-60 MIPS (release).
 - [ ] **Phase 5: doomgeneric port** with picolibc and doom1.wad embedded in memory.
   *Accept:* first rendered frame dumps to PNG.
   *Fallback:* ship Phase 3 programs in the browser.

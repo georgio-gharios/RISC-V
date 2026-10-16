@@ -19,7 +19,47 @@ The emulator exits with the program's exit code (`main`'s return value).
 ## C toolchain (bare metal, no libc)
 Needs `clang`, `ld.lld`, `llvm-objcopy` (Ubuntu: `apt-get install clang lld llvm`).
 
-    make -C programs              # builds hello_asm.bin, hello.bin, mandel.bin, primes.bin
+    make -C programs              # builds hello_asm, hello, mandel, primes, fbtest, devtest (.bin)
+    make -C programs expected     # host-compiled reference output (*.expected), uses cc
+    cargo run --release -- programs/mandel.bin
+
+One program by hand (what the Makefile does):
+
+    cd programs
+    clang --target=riscv32 -march=rv32im -mabi=ilp32 -O2 -ffreestanding -nostdlib -fno-builtin \
+          -fuse-ld=lld -Wl,--no-relax -Wl,-T,link.ld crt0.S rt.c hello.c -o hello.elf
+    llvm-objcopy -O binary hello.elf hello.bin
+
+`crt0.S` sets sp to the top of RAM, zeroes .bss, calls `main`, then `ecall`s with its return value.
+Built `.bin` and `.expected` files are committed so `cargo test` works without the cross toolchain.
+
+## Official riscv-tests (rv32ui + rv32um)
+    ./scripts/build-riscv-tests.sh            # clones riscv-tests into third_party/, rebuilds tests/riscv-bin/*.bin
+    cargo run --release --bin riscv-tests     # prints pass/fail table
+The prebuilt binaries in `tests/riscv-bin/` are committed, so `cargo test` needs no cross toolchain.
+They use a minimal env (`tests/riscv-env/riscv_test.h`): pass = `ecall` with a0=0, fail = `ecall` with a0=(test#<<1)|1.
+
+## Memory map
+| Address | Size | Device | Access |
+|---|---|---|---|
+| `0x1000_0000` | 0x100 | UART: write byte to +0 prints it; +5 reads 0x20 (TX ready) | R/W |
+| `0x1100_0000` | 4 | Timer: milliseconds since start (u32). Set by the host: wall clock in the CLI | R |
+| `0x1200_0000` | 4 | Keyboard: a word read pops one event. 0 = none, else `(pressed << 8) \| keycode` | R |
+| `0x1300_0000` | 4 | Display control: any store = frame done (counter +1); read = frame counter | R/W |
+| `0x2000_0000` | 256000 | Framebuffer: 320x200, 32-bit `0x00RRGGBB`, pixel (x,y) at +4*(y*320+x) | R/W |
+| `0x8000_0000` | 64 MiB | RAM. Raw binary loaded here, pc starts here, sp = top of RAM | R/W |
+
+C definitions are in `programs/devices.h`. `ecall` halts with exit code = a0. `ebreak` halts.
+
+## CLI
+    rv-doom <program.bin> [--max-steps N] [--png out.png] [--png-at-frame N]
+    cargo run --release -- programs/fbtest.bin --png fb.png     # dump the framebuffer (see docs/fbtest.png)
+`--png-at-frame N` stops once the guest has signalled N frames. Prints instruction count and MIPS on exit.
+
+## C toolchain (bare metal, no libc)
+Needs `clang`, `ld.lld`, `llvm-objcopy` (Ubuntu: `apt-get install clang lld llvm`).
+
+    make -C programs              # builds hello_asm, hello, mandel, primes, fbtest, devtest (.bin)
     make -C programs expected     # host-compiled reference output (*.expected), uses cc
     cargo run --release -- programs/mandel.bin
 

@@ -2,6 +2,7 @@ pub mod cpu;
 pub mod decode;
 pub mod devices;
 pub mod mem;
+pub mod png;
 
 use cpu::Cpu;
 use mem::{Bus, RAM_BASE};
@@ -15,6 +16,12 @@ pub fn machine(image: &[u8], ram_size: usize, echo_uart: bool) -> Result<Cpu, me
     let mut cpu = Cpu::new(bus, RAM_BASE);
     cpu.regs[2] = RAM_BASE.wrapping_add(ram_size as u32); // sp
     Ok(cpu)
+}
+
+/// Framebuffer contents as a PNG file.
+pub fn framebuffer_png(cpu: &Cpu) -> Vec<u8> {
+    use devices::Framebuffer as Fb;
+    png::encode_rgb(Fb::WIDTH as u32, Fb::HEIGHT as u32, &cpu.bus.fb.rgb())
 }
 
 /// Result of running one riscv-tests binary (see tests/riscv-env/riscv_test.h).

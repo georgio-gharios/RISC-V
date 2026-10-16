@@ -7,7 +7,8 @@ LDFLAGS = -fuse-ld=lld -Wl,--no-relax -Wl,-T,link.ld
 OBJCOPY = llvm-objcopy
 
 C_PROGS = hello mandel primes
-BINS    = hello_asm.bin $(C_PROGS:=.bin)
+DEV_PROGS = fbtest devtest
+BINS    = hello_asm.bin $(C_PROGS:=.bin) $(DEV_PROGS:=.bin)
 
 all: $(BINS)
 
@@ -15,7 +16,7 @@ hello_asm.elf: hello_asm.S
 	$(CC) --target=riscv32 -march=rv32i -mabi=ilp32 -nostdlib -fuse-ld=lld -Wl,--no-relax \
 	  -Wl,-Ttext=0x80000000 $< -o $@
 
-%.elf: %.c crt0.S rt.c rt.h link.ld
+%.elf: %.c crt0.S rt.c rt.h devices.h link.ld
 	$(CC) $(CFLAGS) $(LDFLAGS) crt0.S rt.c $< -o $@
 
 %.bin: %.elf
