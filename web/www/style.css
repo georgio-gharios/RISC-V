@@ -57,6 +57,14 @@ canvas {
   border-radius: 4px;
   outline: none;
 }
+.screen-wrap { position: relative; }
+.screen-wrap canvas { display: block; }
+#debug {
+  position: absolute; top: 8px; left: 8px; margin: 0; padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.78); color: #9fe870; border-radius: 4px;
+  font-size: 12px; line-height: 1.35; pointer-events: none; white-space: pre;
+  max-width: calc(100% - 16px); overflow: hidden;
+}
 canvas:focus { border-color: var(--dim); }
 .help { font-size: 12px; }
 pre#console {

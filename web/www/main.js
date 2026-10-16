@@ -30,6 +30,20 @@ let wasm, running = true, halted = false;
 let lastStats = { t: 0, instret: 0, frames: 0 };
 let prevRegs = new Uint32Array(33);
 
+// Debug overlay (toggle with the ` key, or start with ?debug). Measurements always run; the
+// latest snapshot is also exposed as window.rvDebug for the headless tests.
+const DEBUG_KEY = "Backquote";  // unused by Doom; never forwarded to the guest
+const dbg = {
+  on: new URLSearchParams(location.search).has("debug"),
+  gameticAddr: 0,
+  keys: [], held: new Map(), sent: 0,      // key log, keys down in the guest, events queued since load
+  win: null,                               // start of the current 1 s measurement window
+  raf: 0, draws: 0, runMs: 0, maxJump: 0, lastTimer: 0,
+  load: null,                              // {wall, timer} at program load
+  tic0: null,                              // {wall, tic} when gametic was first seen non-zero
+  snap: {},
+};
+
 const text = (len) => decoder.decode(new Uint8Array(wasm.memory.buffer, wasm.text_ptr(), len));
 
 async function loadProgram(path) {
@@ -41,6 +55,8 @@ async function loadProgram(path) {
   if (wasm.load() !== 0) throw new Error("image does not fit in RAM");
   $("console").textContent = "";
   halted = false;
+  dbg.isDoom = path === "doom.bin";
+  dbg.load = null; dbg.tic0 = null; dbg.sent = 0; dbg.held.clear(); dbg.keys = []; dbg.win = null;
   lastStats = { t: performance.now(), instret: 0, frames: 0 };
   draw(); updatePanel();
 }
@@ -86,14 +102,82 @@ function updateStats(now) {
   lastStats = { t: now, instret, frames };
 }
 
+function logKey(e, code, fate) {
+  const mods = ["Ctrl", "Shift", "Alt", "Meta"].filter((m) => e[m.toLowerCase() + "Key"]).join("+");
+  const entry = { t: performance.now(), type: e.type === "keydown" ? "down" : "up", code: e.code, key: e.key,
+                  repeat: e.repeat, mods, doom: code, fate, seq: 0 };
+  if (fate === "sent") entry.seq = ++dbg.sent;
+  dbg.keys.push(entry);
+  if (dbg.keys.length > 10) dbg.keys.shift();
+}
+
+function keyLine(k) {
+  const t = ((k.t - (dbg.load?.wall ?? 0)) / 1000).toFixed(2).padStart(7);
+  const doom = k.doom ? "0x" + k.doom.toString(16).padStart(2, "0") : "    ";
+  const fate = k.fate !== "sent" ? "DROPPED (" + k.fate + ")"
+    : wasm.keys_delivered() >= k.seq ? `delivered #${k.seq}` : `queued #${k.seq}`;
+  return `${t}s ${k.type.padEnd(4)} ${k.code.padEnd(11)} ${(k.mods || "-").padEnd(10)} ${k.repeat ? "rep" : "   "} ${doom} ${fate}`;
+}
+
+// Called once per animation frame with the guest timer jump seen by this frame's slices.
+function debugSample(sliceMs, newFrame) {
+  const now = performance.now();  // not the rAF timestamp: it is stale on the first frame after a load
+  if (!dbg.load) dbg.load = { wall: now, timer: wasm.timer_ms() };
+  const w = dbg.win ??= { t: now, instret: wasm.instret(), frames: wasm.frames(), tic: 0 };
+  dbg.raf++; dbg.runMs += sliceMs; if (newFrame) dbg.draws++;
+  const tic = dbg.isDoom && dbg.gameticAddr ? wasm.peek(dbg.gameticAddr) : 0;
+  if (tic && !dbg.tic0) dbg.tic0 = { wall: now, tic };
+  if (!w.tic) w.tic = tic;
+  const dt = (now - w.t) / 1000;
+  if (dt >= 1) {
+    const s = dbg.snap = {
+      rafFps: dbg.raf / dt,                                   // animation frames the browser gave us
+      drawFps: dbg.draws / dt,                                // canvas updates that showed a new guest frame
+      guestFps: (wasm.frames() - w.frames) / dt,              // DG_DrawFrame calls
+      mips: (wasm.instret() - w.instret) / dt / 1e6,
+      cpuShare: dbg.runMs / (dt * 1000),                      // share of wall time spent inside wasm.run
+      maxJumpMs: dbg.maxJump,                                 // largest guest-clock step between two run() calls
+      clockDriftMs: (wasm.timer_ms() - dbg.load.timer) - (now - dbg.load.wall),
+      ticsPerSec: tic && w.tic ? (tic - w.tic) / dt : null,
+      gameDriftMs: dbg.tic0 ? (tic - dbg.tic0.tic) * 1000 / 35 - (now - dbg.tic0.wall) : null,
+      gametic: tic,
+      keys: dbg.keys.map(keyLine),
+      held: [...dbg.held.keys()],
+    };
+    window.rvDebug = s;
+    dbg.win = { t: now, instret: wasm.instret(), frames: wasm.frames(), tic };
+    dbg.raf = dbg.draws = dbg.runMs = dbg.maxJump = 0;
+  }
+  if (dbg.on) renderDebug();
+}
+
+function renderDebug() {
+  const s = dbg.snap, f = (v, d = 1) => (v == null ? "n/a" : v.toFixed(d));
+  const el = $("debug");
+  el.hidden = false;
+  el.textContent = [
+    `display  ${f(s.rafFps)} rAF/s   ${f(s.drawFps)} new frames drawn/s   guest ${f(s.guestFps)} fps`,
+    `emulator ${f(s.mips)} MIPS   guest ran ${f(100 * s.cpuShare, 0)}% of wall time`,
+    `timer    guest-vs-wall drift ${f(s.clockDriftMs, 0)} ms   max clock jump ${f(s.maxJumpMs, 0)} ms`,
+    `doom     gametic ${s.gametic ?? "n/a"}   ${f(s.ticsPerSec)} tics/s (want 35)   game-time drift ${f(s.gameDriftMs, 0)} ms`,
+    `held     ${s.held?.length ? s.held.map((c) => "0x" + c.toString(16)).join(" ") : "-"}`,
+    `last ${dbg.keys.length} key events (t, type, code, modifiers, repeat, doom code, fate):`,
+    ...dbg.keys.map(keyLine),
+  ].join("\n");
+}
+
 let lastPanel = 0;
 function tick(now) {
   if (running && !halted) {
     // Run in slices until ~12 ms of this animation frame are used.
-    const start = performance.now();
+    const start = performance.now(), frames0 = wasm.frames();
     do {
-      halted = wasm.run(100000, Math.floor(performance.now())) !== 0;
+      const t = Math.floor(performance.now());
+      if (dbg.lastTimer) dbg.maxJump = Math.max(dbg.maxJump, t - dbg.lastTimer);
+      dbg.lastTimer = t;
+      halted = wasm.run(100000, t) !== 0;
     } while (!halted && performance.now() - start < 12);
+    debugSample(performance.now() - start, wasm.frames() !== frames0);
     draw();
     drainConsole();
     if (now - lastPanel > 100 || halted) { updatePanel(); lastPanel = now; }
@@ -126,15 +210,24 @@ async function main() {
 
   for (const type of ["keydown", "keyup"]) {
     window.addEventListener(type, (e) => {
-      if (e.target === select) return;
+      if (e.code === DEBUG_KEY) {
+        e.preventDefault();
+        if (type === "keydown" && !e.repeat) { dbg.on = !dbg.on; $("debug").hidden = !dbg.on; if (dbg.on) renderDebug(); }
+        return;
+      }
       const code = doomKey(e);
-      if (!code) return;
+      if (e.target === select) return logKey(e, code, "select focused");
+      if (!code) return logKey(e, code, "unmapped");
       e.preventDefault();
-      if (type === "keydown" && e.repeat) return;
+      if (type === "keydown" && e.repeat) return logKey(e, code, "repeat");
+      logKey(e, code, "sent");
+      if (type === "keydown") dbg.held.set(code, true); else dbg.held.delete(code);
       wasm.key(code, type === "keydown" ? 1 : 0);
     });
   }
 
+  fetch("doom.syms.json").then((r) => r.json())
+    .then((syms) => { dbg.gameticAddr = parseInt(syms.gametic, 16) || 0; }).catch(() => {});
   // Default to Doom; fall back to the Phase 3 programs if doom.bin isn't deployed.
   try { await loadProgram(PROGRAMS[0][0]); }
   catch (e) { select.value = PROGRAMS[1][0]; await loadProgram(select.value).catch(showError); }

@@ -86,6 +86,20 @@ pub extern "C" fn instret() -> f64 { with(|w| w.cpu.as_ref().map_or(0, |c| c.ins
 #[no_mangle]
 pub extern "C" fn frames() -> u32 { with(|w| w.cpu.as_ref().map_or(0, |c| c.bus.fb.frames)) }
 
+/// Debug overlay: key events the guest has popped from the keyboard queue so far.
+#[no_mangle]
+pub extern "C" fn keys_delivered() -> f64 { with(|w| w.cpu.as_ref().map_or(0, |c| c.bus.keyboard.delivered) as f64) }
+
+/// Debug overlay: the timer value the guest currently sees (ms).
+#[no_mangle]
+pub extern "C" fn timer_ms() -> u32 { with(|w| w.cpu.as_ref().map_or(0, |c| c.bus.timer.ms)) }
+
+/// Debug overlay: read a guest word (e.g. Doom's `gametic`); 0 if unmapped.
+#[no_mangle]
+pub extern "C" fn peek(addr: u32) -> u32 {
+    with(|w| w.cpu.as_mut().and_then(|c| c.bus.read(addr, 4).ok()).unwrap_or(0))
+}
+
 fn set_text(w: &mut Web, s: String) -> usize { w.text = s; w.text.len() }
 
 /// Disassembly of the instruction at pc. Returns the length; read it at `text_ptr()`.

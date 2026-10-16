@@ -24,8 +24,11 @@
 
   <main>
     <section class="screen">
-      <canvas id="screen" width="320" height="200" tabindex="0"></canvas>
-      <div class="help dim">Arrows move · Ctrl fire · Space use · Shift run · Alt strafe · Enter/Esc menu</div>
+      <div class="screen-wrap">
+        <canvas id="screen" width="320" height="200" tabindex="0"></canvas>
+        <pre id="debug" hidden></pre>
+      </div>
+      <div class="help dim">Arrows move · Ctrl fire · Space use · Shift run · Alt strafe · Enter/Esc menu · ` debug overlay</div>
       <pre id="console"></pre>
     </section>
 

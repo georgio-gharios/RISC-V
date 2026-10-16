@@ -47,13 +47,14 @@ impl Timer {
 pub struct Keyboard {
     pub queue: std::collections::VecDeque<u32>,
     current: u32, // event being read byte by byte
+    pub delivered: u64, // events popped by the guest (for the debug overlay)
 }
 
 impl Keyboard {
     pub const BASE: u32 = 0x1200_0000;
     pub const SIZE: u32 = 4;
 
-    pub fn new() -> Self { Keyboard { queue: Default::default(), current: 0 } }
+    pub fn new() -> Self { Keyboard { queue: Default::default(), current: 0, delivered: 0 } }
 
     pub fn push(&mut self, keycode: u8, pressed: bool) {
         self.queue.push_back(((pressed as u32) << 8) | keycode as u32);
@@ -63,6 +64,7 @@ impl Keyboard {
     pub fn read8(&mut self, offset: u32) -> u8 {
         if offset == 0 {
             self.current = self.queue.pop_front().unwrap_or(0);
+            self.delivered += (self.current != 0) as u64;
         }
         (self.current >> (8 * offset)) as u8
     }

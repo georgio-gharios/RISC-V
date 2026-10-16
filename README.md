@@ -111,6 +111,11 @@ download from GitHub is blocked here). Needs `rustup target add wasm32-unknown-u
     ./web/build.sh                          # -> web/www/{rv_doom_web.wasm, programs/, doom.bin if built}
     python3 -m http.server -d web/www 8000  # open http://localhost:8000
     cd web && npm install && npm run smoke  # headless Chromium test (Playwright), checks Doom + Mandelbrot
+    cd web && npm run measure                # headless run that prints the debug overlay (fps, MIPS, timer drift, key log)
+
+In the browser, press <kbd>`</kbd> (backquote, never sent to Doom) or open `/?debug` for the debug overlay:
+display/guest fps, MIPS, share of wall time the guest ran, guest-clock vs wall drift, Doom `gametic` rate (35/s
+is correct) and game-time drift, held keys, and the last 10 key events with their fate (delivered / queued / dropped).
 
 Controls: arrows move, Ctrl fire, Space use, Shift run, Alt strafe, Enter/Esc menu, Y to confirm.
 If `doom.bin` is not deployed, the page falls back to the Phase 3 programs. See `docs/web.png`.

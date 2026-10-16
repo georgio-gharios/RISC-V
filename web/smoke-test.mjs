@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = new URL("./www/", import.meta.url).pathname;
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm" };
+const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json" };
 const server = http.createServer((req, res) => {
   const file = path.join(ROOT, decodeURIComponent(req.url.split("?")[0]) === "/" ? "index.html" : req.url);
   fs.readFile(file, (err, data) => {

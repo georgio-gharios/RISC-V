@@ -40,6 +40,13 @@ Hard stop after each phase. Do not start the next until told "next".
 | doom1.wad | archive.org/doomworld/ibiblio blocked | `apt-get install doom-wad-shareware` (used; v1.9, sha1 5b2e249b) |
 
 
+## Polish phase
+- [x] **Step 1: debug overlay** (` key or `?debug`; `npm run measure` prints it headless).
+  *Measured (headless Chromium):* 60 rAF/s, 13-21 guest fps, 41-49 MIPS, guest runs ~77% of wall time,
+  guest clock = wall clock (drift 0 ms, max jump 7-10 ms), gametic 34-37 tics/s, but game time is ~1.8 s behind
+  wall time after starting E1M1 (lost during the level start, never caught up). All sent key events were
+  delivered; repeats and unmapped keys are dropped as intended; Ctrl fired (ammo 50 -> 48). Screenshot: docs/debug-overlay.png.
+
 ## Next (not started; see HANDOFF.md §6 for acceptance tests)
 - [ ] Fix dropdown focus eating arrow keys + release keys on window blur
 - [ ] Gameplay smoke test (fire/move in E1M1), verifies hypothesis A (input)
